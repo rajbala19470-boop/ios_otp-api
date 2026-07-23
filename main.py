@@ -56,7 +56,7 @@ DEFAULT_EMOJIS = {
     }
 }
 
-# ================= নতুন ইমোজি আইডি (প্যানেল বাটনের জন্য) =================
+# ================= নতুন ইমোজি আইডি (প্যানেলের জন্য) =================
 CUSTOM_EMOJIS = {
     "NEW_TOKEN": "5877410604225924969",
     "LIST_TOKENS": "6204104220694550861",
@@ -68,14 +68,21 @@ CUSTOM_EMOJIS = {
     "BACK": "5888484185261216745",
     "CANCEL": "6206396878532121864",
     "ADMIN": "4958725487682650920",
+    "OTP_BUTTON": "6206420230269310869",   # ← প্যানেলের জন্য যোগ
+    "GREEN_CIRCLE": "5188234920639632382",
+    "RED_CIRCLE": "6206141323683042874",
+    "CLOCK": "5436207838181471199",
+    "ROCKET": "5337127177500510090",
+    "GAMEPAD": "5319133596697524570",
+    "WELCOME_SPARKLE": "5363992034728229166",
+    "CHECK_MARK": "4956721670690702265",
 }
 
 def get_custom_emoji(key):
     return CUSTOM_EMOJIS.get(key, "")
 
-# ================= প্যানেল বাটনের জন্য ফাংশন (HTML ট্যাগ ছাড়া) =================
+# ================= প্যানেল বাটন (শুধু টেক্সট + আইকন) =================
 def panel_button(text, callback, emoji_key, style=None):
-    """ইনলাইন বাটন তৈরি করে – টেক্সটে সাধারণ ইমোজি, আইকন হিসেবে কাস্টম ইমোজি"""
     return InlineKeyboardButton(
         text=text,
         callback_data=callback,
@@ -83,7 +90,7 @@ def panel_button(text, callback, emoji_key, style=None):
         icon_custom_emoji_id=get_custom_emoji(emoji_key)
     )
 
-# ================= সকল দেশ (agent.py থেকে সম্পূর্ণ) =================
+# ================= সকল দেশ (পুরো ম্যাপ) =================
 COUNTRY_CODE_MAP = {
     "1": ("US", "🇺🇸", "USA"),
     "7": ("RU", "🇷🇺", "RUSSIA"),
@@ -631,6 +638,7 @@ def build_otp_message(entry):
     if country_emoji_id:
         country_display = f'<tg-emoji emoji-id="{country_emoji_id}">{flag}</tg-emoji><b>{iso or country_raw.upper()}</b>'
     else:
+        # কাস্টম ইমোজি না থাকলে সাধারণ ফ্ল্যাগ ব্যবহার
         country_display = f'{flag}<b>{iso or country_raw.upper()}</b>'
 
     # সার্ভিসের তথ্য
@@ -832,25 +840,37 @@ def admin_only(func):
         return await func(update, context)
     return wrapper
 
-# ----- প্যানেল (বাটনে HTML ট্যাগ নয়, আইকন হিসেবে কাস্টম ইমোজি) -----
+# ----- প্যানেল (শুধু কাস্টম ইমোজি, কোনো সাধারণ ইমোজি নয়) -----
 @admin_only
 async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [panel_button("➕ New Token", "new_token", "NEW_TOKEN", KBS.PRIMARY)],
-        [panel_button("📋 List Tokens", "list_tokens", "LIST_TOKENS")],
-        [panel_button("ℹ️ Token Info", "token_info", "TOKEN_INFO")],
-        [panel_button("❌ Remove Token", "remove_token", "REMOVE_TOKEN", KBS.DANGER)],
-        [panel_button("✅ Enable Token", "enable_token", "ENABLE_TOKEN", KBS.SUCCESS)],
-        [panel_button("📊 Stats", "stats", "STATS")],
-        [panel_button("🔄 Refresh", "refresh_panel", "REFRESH")],
+        [panel_button("New Token", "new_token", "NEW_TOKEN", KBS.PRIMARY)],
+        [panel_button("List Tokens", "list_tokens", "LIST_TOKENS")],
+        [panel_button("Token Info", "token_info", "TOKEN_INFO")],
+        [panel_button("Remove Token", "remove_token", "REMOVE_TOKEN", KBS.DANGER)],
+        [panel_button("Enable Token", "enable_token", "ENABLE_TOKEN", KBS.SUCCESS)],
+        [panel_button("Stats", "stats", "STATS")],
+        [panel_button("Refresh", "refresh_panel", "REFRESH")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # প্যানেলের মেসেজ – সব জায়গায় কাস্টম ইমোজি
+    admin_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["ADMIN"]}">🤖</tg-emoji>'
+    stats_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["STATS"]}">📊</tg-emoji>'
+    green_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["GREEN_CIRCLE"]}">🟢</tg-emoji>'
+    red_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["RED_CIRCLE"]}">🔴</tg-emoji>'
+    otp_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["OTP_BUTTON"]}">🔑</tg-emoji>'
+
+    text = (
+        f"{admin_emoji} <b>API Management Panel</b>\n\n"
+        f"{stats_emoji} Total Tokens: <b>{get_token_count()}</b>\n"
+        f"{green_emoji} Active: <b>{get_active_count()}</b>\n"
+        f"{red_emoji} Inactive: <b>{get_inactive_count()}</b>\n"
+        f"{otp_emoji} Total OTPs: <b>{get_otp_count()}</b>"
+    )
+
     await update.message.reply_text(
-        f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["ADMIN"]}">🤖</tg-emoji> <b>API Management Panel</b>\n\n'
-        f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["STATS"]}">📊</tg-emoji> Total Tokens: <b>{get_token_count()}</b>\n'
-        f'<tg-emoji emoji-id="5188234920639632382">🟢</tg-emoji> Active: <b>{get_active_count()}</b>\n'
-        f'<tg-emoji emoji-id="6206141323683042874">🔴</tg-emoji> Inactive: <b>{get_inactive_count()}</b>\n'
-        f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["OTP_BUTTON"]}">🔑</tg-emoji> Total OTPs: <b>{get_otp_count()}</b>',
+        text,
         reply_markup=reply_markup,
         parse_mode="HTML"
     )
@@ -861,15 +881,19 @@ async def new_token_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     keyboard = [
-        [panel_button("📆 7 Days", "new_token_7", "CLOCK", KBS.PRIMARY)],
-        [panel_button("🚀 30 Days", "new_token_30", "ROCKET", KBS.PRIMARY)],
-        [panel_button("🎮 90 Days", "new_token_90", "GAMEPAD", KBS.PRIMARY)],
-        [panel_button("✨ Custom Date", "new_token_custom", "WELCOME_SPARKLE", KBS.PRIMARY)],
-        [panel_button("🔙 Back", "panel", "BACK", KBS.SECONDARY)],
+        [panel_button("7 Days", "new_token_7", "CLOCK", KBS.PRIMARY)],
+        [panel_button("30 Days", "new_token_30", "ROCKET", KBS.PRIMARY)],
+        [panel_button("90 Days", "new_token_90", "GAMEPAD", KBS.PRIMARY)],
+        [panel_button("Custom Date", "new_token_custom", "WELCOME_SPARKLE", KBS.PRIMARY)],
+        [panel_button("Back", "panel", "BACK", KBS.SECONDARY)],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
+
+    new_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["NEW_TOKEN"]}">➕</tg-emoji>'
+    text = f"{new_emoji} <b>Create New Token</b>\n\nChoose expiry duration:"
+
     await query.edit_message_text(
-        f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["NEW_TOKEN"]}">➕</tg-emoji> <b>Create New Token</b>\n\nChoose expiry duration:',
+        text,
         reply_markup=reply_markup,
         parse_mode="HTML"
     )
@@ -883,25 +907,34 @@ async def create_token_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if query.data in days_map:
         days = days_map[query.data]
         token, created, expires = create_token(f"Token_{datetime.now().strftime('%Y%m%d')}", days)
+
+        check_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CHECK_MARK"]}">✅</tg-emoji>'
+        info_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["TOKEN_INFO"]}">ℹ️</tg-emoji>'
+        admin_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["ADMIN"]}">🔑</tg-emoji>'
+        clock_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CLOCK"]}">📅</tg-emoji>'
+        green_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["GREEN_CIRCLE"]}">🟢</tg-emoji>'
+
         text = (
-            f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CHECK_MARK"]}">✅</tg-emoji> <b>New API token created!</b>\n\n'
-            f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["TOKEN_INFO"]}">ℹ️</tg-emoji> Name: <code>Token_{datetime.now().strftime("%Y%m%d")}</code>\n'
-            f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["ADMIN"]}">🔑</tg-emoji> Token: <code>{token}</code>\n'
-            f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CLOCK"]}">📅</tg-emoji> Created: {created}\n'
-            f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CLOCK"]}">⏰</tg-emoji> Expires: {expires}\n'
-            f'<tg-emoji emoji-id="5188234920639632382">🟢</tg-emoji> Status: Active\n\n'
-            f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["ADMIN"]}">📌</tg-emoji> Usage:\n'
-            f'<code>/get_otp?number=NUMBER&token={token}</code>'
+            f"{check_emoji} <b>New API token created!</b>\n\n"
+            f"{info_emoji} Name: <code>Token_{datetime.now().strftime('%Y%m%d')}</code>\n"
+            f"{admin_emoji} Token: <code>{token}</code>\n"
+            f"{clock_emoji} Created: {created}\n"
+            f"{clock_emoji} Expires: {expires}\n"
+            f"{green_emoji} Status: Active\n\n"
+            f"{admin_emoji} Usage:\n"
+            f"<code>/get_otp?number=NUMBER&token={token}</code>"
         )
-        keyboard = [[panel_button("🔙 Back", "panel", "BACK", KBS.SECONDARY)]]
+        keyboard = [[panel_button("Back", "panel", "BACK", KBS.SECONDARY)]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
     elif query.data == "new_token_custom":
         context.user_data["awaiting_custom_token"] = True
+        sparkle_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["WELCOME_SPARKLE"]}">✨</tg-emoji>'
         text = (
-            f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["WELCOME_SPARKLE"]}">✨</tg-emoji> <b>Create Token with Custom Date</b>\n\n'
+            f"{sparkle_emoji} <b>Create Token with Custom Date</b>\n\n"
             "Send: <code>Name|YYYY-MM-DD</code>\nExample: <code>MyApp|2026-12-31</code>"
         )
-        keyboard = [[panel_button("❌ Cancel", "panel", "CANCEL", KBS.DANGER)]]
+        keyboard = [[panel_button("Cancel", "panel", "CANCEL", KBS.DANGER)]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 # ----- কাস্টম টোকেন (টেক্সট ইনপুট) -----
@@ -921,21 +954,29 @@ async def handle_custom_token(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         expiry_date = datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d %H:%M:%S")
         token, created, expires = create_token_with_date(name, expiry_date)
+
+        check_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CHECK_MARK"]}">✅</tg-emoji>'
+        info_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["TOKEN_INFO"]}">ℹ️</tg-emoji>'
+        admin_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["ADMIN"]}">🔑</tg-emoji>'
+        clock_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CLOCK"]}">📅</tg-emoji>'
+        green_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["GREEN_CIRCLE"]}">🟢</tg-emoji>'
+
         msg = (
-            f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CHECK_MARK"]}">✅</tg-emoji> <b>New API token created!</b>\n\n'
-            f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["TOKEN_INFO"]}">ℹ️</tg-emoji> Name: <code>{name}</code>\n'
-            f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["ADMIN"]}">🔑</tg-emoji> Token: <code>{token}</code>\n'
-            f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CLOCK"]}">📅</tg-emoji> Created: {created}\n'
-            f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CLOCK"]}">⏰</tg-emoji> Expires: {expires}\n'
-            f'<tg-emoji emoji-id="5188234920639632382">🟢</tg-emoji> Status: Active\n\n'
-            f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["ADMIN"]}">📌</tg-emoji> Usage:\n'
-            f'<code>/get_otp?number=NUMBER&token={token}</code>'
+            f"{check_emoji} <b>New API token created!</b>\n\n"
+            f"{info_emoji} Name: <code>{name}</code>\n"
+            f"{admin_emoji} Token: <code>{token}</code>\n"
+            f"{clock_emoji} Created: {created}\n"
+            f"{clock_emoji} Expires: {expires}\n"
+            f"{green_emoji} Status: Active\n\n"
+            f"{admin_emoji} Usage:\n"
+            f"<code>/get_otp?number=NUMBER&token={token}</code>"
         )
-        keyboard = [[panel_button("🔙 Back", "panel", "BACK", KBS.SECONDARY)]]
+        keyboard = [[panel_button("Back", "panel", "BACK", KBS.SECONDARY)]]
         await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
     except ValueError:
+        red_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["RED_CIRCLE"]}">❌</tg-emoji>'
         await update.message.reply_text(
-            f'<tg-emoji emoji-id="6206141323683042874">❌</tg-emoji> Invalid date format. Use YYYY-MM-DD',
+            f"{red_emoji} Invalid date format. Use YYYY-MM-DD",
             parse_mode="HTML"
         )
 
@@ -946,18 +987,23 @@ async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     tokens = get_all_tokens()
     if not tokens:
+        red_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["RED_CIRCLE"]}">⚠️</tg-emoji>'
         await query.edit_message_text(
-            f'<tg-emoji emoji-id="6206141323683042874">⚠️</tg-emoji> No tokens found.',
-            reply_markup=InlineKeyboardMarkup([[panel_button("🔙 Back", "panel", "BACK", KBS.SECONDARY)]])
+            f"{red_emoji} No tokens found.",
+            reply_markup=InlineKeyboardMarkup([[panel_button("Back", "panel", "BACK", KBS.SECONDARY)]])
         )
         return
-    text = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["LIST_TOKENS"]}">📋</tg-emoji> <b>API Tokens ({len(tokens)} total)</b>\n\n'
+
+    list_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["LIST_TOKENS"]}">📋</tg-emoji>'
+    text = f"{list_emoji} <b>API Tokens ({len(tokens)} total)</b>\n\n"
     for i, t in enumerate(tokens[:10], 1):
-        status = '<tg-emoji emoji-id="5188234920639632382">🟢</tg-emoji>' if t["is_active"] == 1 and t["expires_at"] > datetime.now().strftime("%Y-%m-%d %H:%M:%S") else '<tg-emoji emoji-id="6206141323683042874">🔴</tg-emoji>'
+        green = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["GREEN_CIRCLE"]}">🟢</tg-emoji>'
+        red = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["RED_CIRCLE"]}">🔴</tg-emoji>'
+        status = green if t["is_active"] == 1 and t["expires_at"] > datetime.now().strftime("%Y-%m-%d %H:%M:%S") else red
         text += f"{status} #{i}: <b>{t['name']}</b>\n"
         text += f"<code>{t['token'][:12]}...</code>\n"
         text += f"📅 Expires: {t['expires_at']}\n\n"
-    keyboard = [[panel_button("🔙 Back", "panel", "BACK", KBS.SECONDARY)]]
+    keyboard = [[panel_button("Back", "panel", "BACK", KBS.SECONDARY)]]
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 # ----- টোকেন তথ্য -----
@@ -966,8 +1012,9 @@ async def token_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["awaiting_token_info"] = True
-    text = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["TOKEN_INFO"]}">ℹ️</tg-emoji> Send the token you want info about.'
-    keyboard = [[panel_button("❌ Cancel", "panel", "CANCEL", KBS.DANGER)]]
+    info_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["TOKEN_INFO"]}">ℹ️</tg-emoji>'
+    text = f"{info_emoji} Send the token you want info about."
+    keyboard = [[panel_button("Cancel", "panel", "CANCEL", KBS.DANGER)]]
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 @admin_only
@@ -978,11 +1025,17 @@ async def handle_token_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["awaiting_token_info"] = False
     info = get_token_info(token)
     if not info:
-        await update.message.reply_text(f'<tg-emoji emoji-id="6206141323683042874">❌</tg-emoji> Token not found.', parse_mode="HTML")
+        red_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["RED_CIRCLE"]}">❌</tg-emoji>'
+        await update.message.reply_text(f"{red_emoji} Token not found.", parse_mode="HTML")
         return
-    status = '<tg-emoji emoji-id="5188234920639632382">🟢</tg-emoji>' if info["is_active"] == 1 and info["expires_at"] > datetime.now().strftime("%Y-%m-%d %H:%M:%S") else '<tg-emoji emoji-id="6206141323683042874">🔴</tg-emoji>'
+
+    info_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["TOKEN_INFO"]}">ℹ️</tg-emoji>'
+    green = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["GREEN_CIRCLE"]}">🟢</tg-emoji>'
+    red = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["RED_CIRCLE"]}">🔴</tg-emoji>'
+    status = green if info["is_active"] == 1 and info["expires_at"] > datetime.now().strftime("%Y-%m-%d %H:%M:%S") else red
+
     text = (
-        f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["TOKEN_INFO"]}">ℹ️</tg-emoji> <b>Token Information</b>\n\n'
+        f"{info_emoji} <b>Token Information</b>\n\n"
         f"🏷️ Name: <b>{info['name']}</b>\n"
         f"🔑 Token: <code>{info['token']}</code>\n"
         f"📊 Status: {status}\n"
@@ -990,7 +1043,7 @@ async def handle_token_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⏰ Expires: {info['expires_at']}\n"
         f"👤 Created by: {info['created_by']}"
     )
-    keyboard = [[panel_button("🔙 Back", "panel", "BACK", KBS.SECONDARY)]]
+    keyboard = [[panel_button("Back", "panel", "BACK", KBS.SECONDARY)]]
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 # ----- টোকেন রিমুভ (ডেঞ্জার) -----
@@ -999,8 +1052,9 @@ async def remove_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["awaiting_remove_token"] = True
-    text = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["REMOVE_TOKEN"]}">❌</tg-emoji> <b>Send the token you want to deactivate.</b>\n\n⚠️ This action can be undone with Enable Token.'
-    keyboard = [[panel_button("❌ Cancel", "panel", "CANCEL", KBS.SECONDARY)]]
+    remove_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["REMOVE_TOKEN"]}">❌</tg-emoji>'
+    text = f"{remove_emoji} <b>Send the token you want to deactivate.</b>\n\n⚠️ This action can be undone with Enable Token."
+    keyboard = [[panel_button("Cancel", "panel", "CANCEL", KBS.SECONDARY)]]
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 @admin_only
@@ -1011,11 +1065,13 @@ async def handle_remove_token(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data["awaiting_remove_token"] = False
     info = get_token_info(token)
     if not info:
-        await update.message.reply_text(f'<tg-emoji emoji-id="6206141323683042874">❌</tg-emoji> Token not found.', parse_mode="HTML")
+        red_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["RED_CIRCLE"]}">❌</tg-emoji>'
+        await update.message.reply_text(f"{red_emoji} Token not found.", parse_mode="HTML")
         return
     deactivate_token(token)
+    check_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CHECK_MARK"]}">✅</tg-emoji>'
     await update.message.reply_text(
-        f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CHECK_MARK"]}">✅</tg-emoji> Token <code>{token[:12]}...</code> deactivated.',
+        f"{check_emoji} Token <code>{token[:12]}...</code> deactivated.",
         parse_mode="HTML"
     )
 
@@ -1025,8 +1081,9 @@ async def enable_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["awaiting_enable_token"] = True
-    text = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["ENABLE_TOKEN"]}">✅</tg-emoji> Send the token you want to reactivate.'
-    keyboard = [[panel_button("❌ Cancel", "panel", "CANCEL", KBS.DANGER)]]
+    enable_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["ENABLE_TOKEN"]}">✅</tg-emoji>'
+    text = f"{enable_emoji} Send the token you want to reactivate."
+    keyboard = [[panel_button("Cancel", "panel", "CANCEL", KBS.DANGER)]]
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 @admin_only
@@ -1037,11 +1094,13 @@ async def handle_enable_token(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data["awaiting_enable_token"] = False
     info = get_token_info(token)
     if not info:
-        await update.message.reply_text(f'<tg-emoji emoji-id="6206141323683042874">❌</tg-emoji> Token not found.', parse_mode="HTML")
+        red_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["RED_CIRCLE"]}">❌</tg-emoji>'
+        await update.message.reply_text(f"{red_emoji} Token not found.", parse_mode="HTML")
         return
     activate_token(token)
+    check_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CHECK_MARK"]}">✅</tg-emoji>'
     await update.message.reply_text(
-        f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CHECK_MARK"]}">✅</tg-emoji> Token <code>{token[:12]}...</code> reactivated.',
+        f"{check_emoji} Token <code>{token[:12]}...</code> reactivated.",
         parse_mode="HTML"
     )
 
@@ -1050,14 +1109,17 @@ async def handle_enable_token(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    stats_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["STATS"]}">📊</tg-emoji>'
+    green = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["GREEN_CIRCLE"]}">🟢</tg-emoji>'
+    red = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["RED_CIRCLE"]}">🔴</tg-emoji>'
     text = (
-        f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["STATS"]}">📊</tg-emoji> <b>Bot Statistics</b>\n\n'
+        f"{stats_emoji} <b>Bot Statistics</b>\n\n"
         f"📈 Total OTPs: <b>{get_otp_count()}</b>\n"
         f"🔑 Total Tokens: <b>{get_token_count()}</b>\n"
-        f'<tg-emoji emoji-id="5188234920639632382">🟢</tg-emoji> Active: <b>{get_active_count()}</b>\n'
-        f'<tg-emoji emoji-id="6206141323683042874">🔴</tg-emoji> Inactive: <b>{get_inactive_count()}</b>'
+        f"{green} Active: <b>{get_active_count()}</b>\n"
+        f"{red} Inactive: <b>{get_inactive_count()}</b>"
     )
-    keyboard = [[panel_button("🔙 Back", "panel", "BACK", KBS.SECONDARY)]]
+    keyboard = [[panel_button("Back", "panel", "BACK", KBS.SECONDARY)]]
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 # ----- রিফ্রেশ -----
