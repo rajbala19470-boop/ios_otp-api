@@ -14,6 +14,15 @@ from telegram.constants import KeyboardButtonStyle as KBS
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 
+# ================= FOLDER SETUP =================
+DATA_FOLDER = "IOS_PANEL_DATA"
+if not os.path.exists(DATA_FOLDER):
+    os.makedirs(DATA_FOLDER)
+
+# Update file paths to be inside DATA_FOLDER
+COOKIE_FILE = os.path.join(DATA_FOLDER, "cookies.json")
+DB_FILE = os.path.join(DATA_FOLDER, "otp.db")
+
 # ================= CONFIG =================
 BOT_TOKEN = "8856560094:AAF-UyEMkFFvpEFgAD2rbRnJR42nWzS3zDA"
 ADMIN_IDS = [8744359777]
@@ -24,8 +33,6 @@ STATS_URL = "http://139.99.9.120/ints/client/SMSCDRStats"
 USERNAME = "otp_work_rakesh"
 PASSWORD = "otp_work_rakesh"
 
-COOKIE_FILE = "cookies.json"
-DB_FILE = "otp.db"
 API_PORT = 5080
 
 CHANNEL_URL = "https://t.me/RHT_NUMBER"
@@ -87,7 +94,7 @@ def panel_button(text, callback, emoji_key, style=None):
         icon_custom_emoji_id=get_custom_emoji(emoji_key)
     )
 
-# ================= ALL COUNTRIES MAP (full) =================
+# ================= ALL COUNTRIES MAP =================
 COUNTRY_CODE_MAP = {
     "1": ("US", "🇺🇸", "USA"),
     "7": ("RU", "🇷🇺", "RUSSIA"),
@@ -297,6 +304,16 @@ def init_db():
         timestamp TEXT,
         full_message TEXT
     )''')
+    # Add missing columns if any
+    c.execute("PRAGMA table_info(messages)")
+    columns = [col[1] for col in c.fetchall()]
+    if "full_message" not in columns:
+        c.execute("ALTER TABLE messages ADD COLUMN full_message TEXT")
+        logger.info("✅ Added missing column 'full_message'")
+    if "country_code" not in columns:
+        c.execute("ALTER TABLE messages ADD COLUMN country_code TEXT")
+        logger.info("✅ Added missing column 'country_code'")
+
     c.execute('''CREATE TABLE IF NOT EXISTS api_tokens (
         token TEXT PRIMARY KEY,
         name TEXT,
@@ -306,6 +323,7 @@ def init_db():
         is_active INTEGER DEFAULT 1
     )''')
     conn.commit()
+    # Test token
     c.execute("SELECT token FROM api_tokens WHERE token='test_token_123'")
     if not c.fetchone():
         expiry = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
@@ -321,7 +339,9 @@ def is_duplicate(msg_id):
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT id FROM messages WHERE id=?", (msg_id,))
-    return c.fetchone() is not None
+    exists = c.fetchone() is not None
+    conn.close()
+    return exists
 
 def save_message(msg_id, number, otp, service, country, country_code, timestamp, full_message):
     conn = get_db()
@@ -346,11 +366,24 @@ def get_otps_by_number(number, limit=50):
     conn.close()
     return [dict(row) for row in rows]
 
+def get_all_otps(limit=25):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute(
+        "SELECT number, otp, service, country, country_code, timestamp, full_message FROM messages ORDER BY timestamp DESC LIMIT ?",
+        (limit,)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
 def get_otp_count():
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM messages")
-    return c.fetchone()[0]
+    count = c.fetchone()[0]
+    conn.close()
+    return count
 
 def get_token_info(token):
     conn = get_db()
@@ -741,41 +774,36 @@ def all_otp_api():
     if not info or info["is_active"] != 1 or info["expires_at"] < datetime.now().strftime("%Y-%m-%d %H:%M:%S"):
         return jsonify({"status": "error", "error": "invalid_token", "message": "Invalid or expired token"}), 401
 
-    conn = get_db()
-    c = conn.cursor()
-    c.execute(
-        "SELECT number, otp, service, country, country_code, timestamp, full_message FROM messages ORDER BY timestamp DESC LIMIT 25"
-    )
-    rows = c.fetchall()
-    conn.close()
-
-    if not rows:
+    try:
+        rows = get_all_otps(25)
+        if not rows:
+            return jsonify({
+                "status": "not_found",
+                "data": {"total": 0, "otps": []},
+                "Sms": "No OTPs found"
+            })
+        formatted = []
+        for row in rows:
+            formatted.append({
+                "number": row.get("number", ""),
+                "otp": row.get("otp", ""),
+                "timestamp": row.get("timestamp", ""),
+                "service": row.get("service", ""),
+                "country": row.get("country", ""),
+                "country_code": row.get("country_code", ""),
+                "message": row.get("full_message", "")
+            })
         return jsonify({
-            "status": "not_found",
-            "data": {"total": 0, "otps": []},
-            "Sms": "No OTPs found"
+            "status": "success",
+            "data": {
+                "total": len(formatted),
+                "otps": formatted
+            },
+            "Sms": f"Found {len(formatted)} recent OTPs"
         })
-
-    otps = []
-    for row in rows:
-        otps.append({
-            "number": row["number"],
-            "otp": row["otp"],
-            "timestamp": row["timestamp"],
-            "service": row["service"],
-            "country": row["country"],
-            "country_code": row.get("country_code", ""),
-            "message": row["full_message"]
-        })
-
-    return jsonify({
-        "status": "success",
-        "data": {
-            "total": len(otps),
-            "otps": otps
-        },
-        "Sms": f"Found {len(otps)} recent OTPs"
-    })
+    except Exception as e:
+        logger.error(f"Error in /all_otp: {e}")
+        return jsonify({"status": "error", "error": "internal_error", "message": str(e)}), 500
 
 @api_app.route('/stats', methods=['GET'])
 def api_stats():
