@@ -26,12 +26,12 @@ PASSWORD = "otp_work_rakesh"
 
 COOKIE_FILE = "cookies.json"
 DB_FILE = "otp.db"
-API_PORT = 5000
+API_PORT = 5080   # ← আপনার দেওয়া পোর্ট
 
 CHANNEL_URL = "https://t.me/your_channel"
 BOT_URL = "https://t.me/your_bot"
 
-# ================= পুরনো EMOJI (OTP মেসেজের জন্য) =================
+# ================= ইমোজি ডিকশনারি =================
 EMOJI = {
     "SEPARATOR": "6307542847251814164",
     "PREFIX": "4958725487682650920",
@@ -41,7 +41,6 @@ EMOJI = {
     "SUCCESS": "6205984471477393007",
 }
 
-# ================= ডিফল্ট ইমোজি (দেশ ও সার্ভিসের জন্য) =================
 DEFAULT_EMOJIS = {
     "services": {
         "uber": "5298715455316303708",
@@ -51,12 +50,11 @@ DEFAULT_EMOJIS = {
         "casushi": "5346008706012169915",
     },
     "countries": {
-        "gb": "5293993521026453119",  # United Kingdom
-        "af": "5292108962391414885",  # Afghanistan
+        "gb": "5293993521026453119",
+        "af": "5292108962391414885",
     }
 }
 
-# ================= নতুন ইমোজি আইডি (প্যানেলের জন্য) =================
 CUSTOM_EMOJIS = {
     "NEW_TOKEN": "5877410604225924969",
     "LIST_TOKENS": "6204104220694550861",
@@ -81,7 +79,6 @@ CUSTOM_EMOJIS = {
 def get_custom_emoji(key):
     return CUSTOM_EMOJIS.get(key, "")
 
-# ================= প্যানেল বাটন (শুধু টেক্সট + আইকন) =================
 def panel_button(text, callback, emoji_key, style=None):
     return InlineKeyboardButton(
         text=text,
@@ -90,7 +87,7 @@ def panel_button(text, callback, emoji_key, style=None):
         icon_custom_emoji_id=get_custom_emoji(emoji_key)
     )
 
-# ================= সকল দেশ (পুরো ম্যাপ) =================
+# ================= সকল দেশ (সম্পূর্ণ ম্যাপ) =================
 COUNTRY_CODE_MAP = {
     "1": ("US", "🇺🇸", "USA"),
     "7": ("RU", "🇷🇺", "RUSSIA"),
@@ -263,7 +260,7 @@ COUNTRY_CODE_MAP = {
     "998": ("UZ", "🇺🇿", "UZBEKISTAN"),
 }
 
-ISO_TO_INFO = {iso: (flag, name) for iso, flag, name in COUNTRY_CODE_MAP.values()}
+ISO_TO_INFO = {iso: (flag, name) for iso, flag, name in COUNTRY_CODE_MAP.items() if iso}
 NAME_TO_ISO = {}
 for code, (iso, flag, name) in COUNTRY_CODE_MAP.items():
     NAME_TO_ISO[name.lower()] = iso
@@ -310,10 +307,9 @@ def init_db():
     )''')
     conn.commit()
 
-    # টেস্ট টোকেন যোগ করুন (যদি না থাকে)
+    # টেস্ট টোকেন তৈরি
     c.execute("SELECT token FROM api_tokens WHERE token='test_token_123'")
     if not c.fetchone():
-        # ৩০ দিন মেয়াদী টেস্ট টোকেন
         expiry = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
         c.execute(
             "INSERT INTO api_tokens (token, name, created_by, created_at, expires_at, is_active) VALUES (?,?,?,?,?,1)",
@@ -433,7 +429,7 @@ def get_inactive_count():
     c.execute("SELECT COUNT(*) FROM api_tokens WHERE is_active=0 OR expires_at <= datetime('now')")
     return c.fetchone()[0]
 
-# ================= OTP ডিটেক্ট (পুরনো) =================
+# ================= OTP ডিটেক্ট =================
 def extract_otp_from_sms(sms_text):
     if not sms_text:
         return None
@@ -500,7 +496,7 @@ def format_number(number):
         return clean, ''
     return clean[:5], clean[-4:]
 
-# ================= স্ক্র্যাপার (পুরনো) =================
+# ================= স্ক্র্যাপার =================
 def solve_captcha(text):
     match = re.search(r"(\d+)\s*\+\s*(\d+)", text)
     return int(match.group(1)) + int(match.group(2)) if match else None
@@ -623,24 +619,19 @@ async def scrape_sms_stats(context):
     finally:
         await page.close()
 
-# ================= OTP মেসেজ তৈরি (পুরনো EMOJI + ডিফল্ট ইমোজি) =================
+# ================= OTP মেসেজ তৈরি =================
 def build_otp_message(entry):
-    # প্রিফিক্স
     prefix = f'<tg-emoji emoji-id="{EMOJI["PREFIX"]}">🤖</tg-emoji>'
-    # সেপারেটর
     separator = f'<tg-emoji emoji-id="{EMOJI["SEPARATOR"]}">➖</tg-emoji>'
 
-    # দেশের তথ্য
     country_raw = entry.get("country", "Unknown")
     iso = get_country_code(country_raw)
     if iso and iso in ISO_TO_INFO:
         flag = ISO_TO_INFO[iso][0]
-        country_name = ISO_TO_INFO[iso][1]
     else:
         flag = "🏳"
-        country_name = country_raw.upper()
+        iso = country_raw.upper()
 
-    # দেশের ইমোজি (ডিফল্ট ইমোজি থেকে)
     country_emoji_id = None
     if iso and iso.lower() in DEFAULT_EMOJIS["countries"]:
         country_emoji_id = DEFAULT_EMOJIS["countries"][iso.lower()]
@@ -648,30 +639,24 @@ def build_otp_message(entry):
         country_emoji_id = DEFAULT_EMOJIS["countries"][country_raw.lower()]
 
     if country_emoji_id:
-        country_display = f'<tg-emoji emoji-id="{country_emoji_id}">{flag}</tg-emoji><b>{iso or country_raw.upper()}</b>'
+        country_display = f'<tg-emoji emoji-id="{country_emoji_id}">{flag}</tg-emoji><b>{iso}</b>'
     else:
-        # কাস্টম ইমোজি না থাকলে সাধারণ ফ্ল্যাগ ব্যবহার
-        country_display = f'{flag}<b>{iso or country_raw.upper()}</b>'
+        country_display = f'{flag}<b>{iso}</b>'
 
-    # সার্ভিসের তথ্য
     service_name = entry.get("service", "Unknown").lower()
     service_display = f'<b>{service_name.capitalize()}</b>'
     if service_name in DEFAULT_EMOJIS["services"]:
         service_emoji_id = DEFAULT_EMOJIS["services"][service_name]
         service_display = f'<tg-emoji emoji-id="{service_emoji_id}">🔧</tg-emoji>'
     else:
-        # ডিফল্ট ইমোজি না থাকলে #service_name
         service_display = f'#{service_name.capitalize()}'
 
-    # মাস্কড নাম্বার
     number = entry.get("number", "")
     prefix_num, suffix_num = format_number(number)
     masked_number = f'<b>+{prefix_num}{separator}{suffix_num}</b>'
 
-    # পুরো টেক্সট
     text = f"{prefix} {country_display} | {service_display} {masked_number}"
 
-    # বাটন
     otp_btn = InlineKeyboardButton(
         "𝐎𝐓𝐏",
         copy_text=CopyTextButton(text=entry["otp"]),
@@ -844,7 +829,7 @@ async def monitor_loop(application):
             await asyncio.sleep(10)
         await asyncio.sleep(3)
 
-# ================= টেলিগ্রাম হ্যান্ডলার (শুধু অ্যাডমিন) =================
+# ================= টেলিগ্রাম হ্যান্ডলার =================
 def admin_only(func):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.effective_user.id not in ADMIN_IDS:
@@ -852,21 +837,19 @@ def admin_only(func):
         return await func(update, context)
     return wrapper
 
-# ----- /start (অ্যাডমিনদের জন্য কমান্ড লিস্ট) -----
 @admin_only
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
+    await update.message.reply_text(
         "🤖 <b>OTP Bot Active</b>\n\n"
         "📌 <b>Commands:</b>\n"
         "/panel - Open API Management Panel\n"
         "/stats - View bot statistics\n"
         "/country ISO|EMOJI_ID - Set country emoji\n"
         "/service NAME|EMOJI_ID - Set service emoji\n"
-        "/list - List all emoji settings"
+        "/list - List all emoji settings",
+        parse_mode="HTML"
     )
-    await update.message.reply_text(text, parse_mode="HTML")
 
-# ----- টেক্সট কমান্ড (পুরনো) -----
 @admin_only
 async def stats_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
@@ -891,10 +874,8 @@ async def country_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if iso not in ISO_TO_INFO:
         await update.message.reply_text(f"❌ Invalid ISO code: {iso}")
         return
-    # ডেটাবেসে ইমোজি আপডেট (যদি টেবিল থাকে, কিন্তু আমরা এখনো কান্ট্রি টেবিল ব্যবহার করছি না)
-    # আমরা DEFAULT_EMOJIS আপডেট করতে পারি, কিন্তু এটি রানটাইমে কাজ করবে না।
-    # আমরা কান্ট্রি টেবিল ব্যবহার করছি না, তাই শুধু মেসেজ দিই।
-    await update.message.reply_text(f"✅ {iso} emoji set to <code>{eid}</code> (temporary – will be stored in DB later)", parse_mode="HTML")
+    # We'll just respond, for now, emoji storage not fully implemented
+    await update.message.reply_text(f"✅ {iso} emoji set to <code>{eid}</code> (temporary)", parse_mode="HTML")
 
 @admin_only
 async def service_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -945,18 +926,14 @@ async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{red_emoji} Inactive: <b>{get_inactive_count()}</b>\n"
         f"{otp_emoji} Total OTPs: <b>{get_otp_count()}</b>"
     )
+    await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
-    await update.message.reply_text(
-        text,
-        reply_markup=reply_markup,
-        parse_mode="HTML"
-    )
-
-# ----- নিউ টোকেন মেনু -----
+# ----- ক্যালব্যাক হ্যান্ডলার (ডিবাগ লগ সহ) -----
 @admin_only
 async def new_token_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    logger.info(f"🔔 Callback: new_token_menu from {update.effective_user.id}")
     keyboard = [
         [panel_button("7 Days", "new_token_7", "CLOCK", KBS.PRIMARY)],
         [panel_button("30 Days", "new_token_30", "ROCKET", KBS.PRIMARY)],
@@ -965,32 +942,27 @@ async def new_token_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [panel_button("Back", "panel", "BACK", KBS.SECONDARY)],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-
     new_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["NEW_TOKEN"]}">➕</tg-emoji>'
-    text = f"{new_emoji} <b>Create New Token</b>\n\nChoose expiry duration:"
-
     await query.edit_message_text(
-        text,
+        f"{new_emoji} <b>Create New Token</b>\n\nChoose expiry duration:",
         reply_markup=reply_markup,
         parse_mode="HTML"
     )
 
-# ----- টোকেন তৈরি (ক্যালব্যাক) -----
 @admin_only
 async def create_token_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    logger.info(f"🔔 Callback: create_token_callback with data {query.data}")
     days_map = {"new_token_7": 7, "new_token_30": 30, "new_token_90": 90}
     if query.data in days_map:
         days = days_map[query.data]
         token, created, expires = create_token(f"Token_{datetime.now().strftime('%Y%m%d')}", days)
-
         check_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CHECK_MARK"]}">✅</tg-emoji>'
         info_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["TOKEN_INFO"]}">ℹ️</tg-emoji>'
         admin_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["ADMIN"]}">🔑</tg-emoji>'
         clock_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CLOCK"]}">📅</tg-emoji>'
         green_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["GREEN_CIRCLE"]}">🟢</tg-emoji>'
-
         text = (
             f"{check_emoji} <b>New API token created!</b>\n\n"
             f"{info_emoji} Name: <code>Token_{datetime.now().strftime('%Y%m%d')}</code>\n"
@@ -1003,18 +975,13 @@ async def create_token_callback(update: Update, context: ContextTypes.DEFAULT_TY
         )
         keyboard = [[panel_button("Back", "panel", "BACK", KBS.SECONDARY)]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-
     elif query.data == "new_token_custom":
         context.user_data["awaiting_custom_token"] = True
         sparkle_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["WELCOME_SPARKLE"]}">✨</tg-emoji>'
-        text = (
-            f"{sparkle_emoji} <b>Create Token with Custom Date</b>\n\n"
-            "Send: <code>Name|YYYY-MM-DD</code>\nExample: <code>MyApp|2026-12-31</code>"
-        )
+        text = f"{sparkle_emoji} <b>Create Token with Custom Date</b>\n\nSend: <code>Name|YYYY-MM-DD</code>\nExample: <code>MyApp|2026-12-31</code>"
         keyboard = [[panel_button("Cancel", "panel", "CANCEL", KBS.DANGER)]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-# ----- কাস্টম টোকেন (টেক্সট ইনপুট) -----
 @admin_only
 async def handle_custom_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("awaiting_custom_token"):
@@ -1031,13 +998,11 @@ async def handle_custom_token(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         expiry_date = datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d %H:%M:%S")
         token, created, expires = create_token_with_date(name, expiry_date)
-
         check_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CHECK_MARK"]}">✅</tg-emoji>'
         info_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["TOKEN_INFO"]}">ℹ️</tg-emoji>'
         admin_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["ADMIN"]}">🔑</tg-emoji>'
         clock_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CLOCK"]}">📅</tg-emoji>'
         green_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["GREEN_CIRCLE"]}">🟢</tg-emoji>'
-
         msg = (
             f"{check_emoji} <b>New API token created!</b>\n\n"
             f"{info_emoji} Name: <code>{name}</code>\n"
@@ -1052,16 +1017,13 @@ async def handle_custom_token(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
     except ValueError:
         red_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["RED_CIRCLE"]}">❌</tg-emoji>'
-        await update.message.reply_text(
-            f"{red_emoji} Invalid date format. Use YYYY-MM-DD",
-            parse_mode="HTML"
-        )
+        await update.message.reply_text(f"{red_emoji} Invalid date format. Use YYYY-MM-DD", parse_mode="HTML")
 
-# ----- টোকেন তালিকা -----
 @admin_only
 async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    logger.info(f"🔔 Callback: list_tokens")
     tokens = get_all_tokens()
     if not tokens:
         red_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["RED_CIRCLE"]}">⚠️</tg-emoji>'
@@ -1070,7 +1032,6 @@ async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([[panel_button("Back", "panel", "BACK", KBS.SECONDARY)]])
         )
         return
-
     list_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["LIST_TOKENS"]}">📋</tg-emoji>'
     text = f"{list_emoji} <b>API Tokens ({len(tokens)} total)</b>\n\n"
     for i, t in enumerate(tokens[:10], 1):
@@ -1083,11 +1044,11 @@ async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[panel_button("Back", "panel", "BACK", KBS.SECONDARY)]]
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-# ----- টোকেন তথ্য -----
 @admin_only
 async def token_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    logger.info(f"🔔 Callback: token_info")
     context.user_data["awaiting_token_info"] = True
     info_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["TOKEN_INFO"]}">ℹ️</tg-emoji>'
     text = f"{info_emoji} Send the token you want info about."
@@ -1105,12 +1066,10 @@ async def handle_token_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         red_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["RED_CIRCLE"]}">❌</tg-emoji>'
         await update.message.reply_text(f"{red_emoji} Token not found.", parse_mode="HTML")
         return
-
     info_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["TOKEN_INFO"]}">ℹ️</tg-emoji>'
     green = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["GREEN_CIRCLE"]}">🟢</tg-emoji>'
     red = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["RED_CIRCLE"]}">🔴</tg-emoji>'
     status = green if info["is_active"] == 1 and info["expires_at"] > datetime.now().strftime("%Y-%m-%d %H:%M:%S") else red
-
     text = (
         f"{info_emoji} <b>Token Information</b>\n\n"
         f"🏷️ Name: <b>{info['name']}</b>\n"
@@ -1123,11 +1082,11 @@ async def handle_token_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[panel_button("Back", "panel", "BACK", KBS.SECONDARY)]]
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-# ----- টোকেন রিমুভ (ডেঞ্জার) -----
 @admin_only
 async def remove_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    logger.info(f"🔔 Callback: remove_token")
     context.user_data["awaiting_remove_token"] = True
     remove_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["REMOVE_TOKEN"]}">❌</tg-emoji>'
     text = f"{remove_emoji} <b>Send the token you want to deactivate.</b>\n\n⚠️ This action can be undone with Enable Token."
@@ -1147,16 +1106,13 @@ async def handle_remove_token(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     deactivate_token(token)
     check_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CHECK_MARK"]}">✅</tg-emoji>'
-    await update.message.reply_text(
-        f"{check_emoji} Token <code>{token[:12]}...</code> deactivated.",
-        parse_mode="HTML"
-    )
+    await update.message.reply_text(f"{check_emoji} Token <code>{token[:12]}...</code> deactivated.", parse_mode="HTML")
 
-# ----- টোকেন এনেবল (সাকসেস) -----
 @admin_only
 async def enable_token(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    logger.info(f"🔔 Callback: enable_token")
     context.user_data["awaiting_enable_token"] = True
     enable_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["ENABLE_TOKEN"]}">✅</tg-emoji>'
     text = f"{enable_emoji} Send the token you want to reactivate."
@@ -1176,16 +1132,13 @@ async def handle_enable_token(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     activate_token(token)
     check_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CHECK_MARK"]}">✅</tg-emoji>'
-    await update.message.reply_text(
-        f"{check_emoji} Token <code>{token[:12]}...</code> reactivated.",
-        parse_mode="HTML"
-    )
+    await update.message.reply_text(f"{check_emoji} Token <code>{token[:12]}...</code> reactivated.", parse_mode="HTML")
 
-# ----- স্ট্যাটাস (ক্যালব্যাক) -----
 @admin_only
 async def stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    logger.info(f"🔔 Callback: stats_callback")
     stats_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["STATS"]}">📊</tg-emoji>'
     green = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["GREEN_CIRCLE"]}">🟢</tg-emoji>'
     red = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["RED_CIRCLE"]}">🔴</tg-emoji>'
@@ -1199,11 +1152,11 @@ async def stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[panel_button("Back", "panel", "BACK", KBS.SECONDARY)]]
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-# ----- রিফ্রেশ -----
 @admin_only
 async def refresh_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    logger.info(f"🔔 Callback: refresh_panel")
     await panel(update, context)
 
 # ---- সাধারণ ইউজারদের জন্য কিছুই না ----
@@ -1218,7 +1171,7 @@ def main():
 
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # কমান্ড হ্যান্ডলার (টেক্সট)
+    # টেক্সট কমান্ড
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("panel", panel))
     application.add_handler(CommandHandler("stats", stats_text))
@@ -1226,7 +1179,7 @@ def main():
     application.add_handler(CommandHandler("service", service_command))
     application.add_handler(CommandHandler("list", list_command))
 
-    # ক্যালব্যাক হ্যান্ডলার (ইনলাইন বাটন)
+    # ক্যালব্যাক হ্যান্ডলার (স্পষ্ট প্যাটার্ন)
     application.add_handler(CallbackQueryHandler(new_token_menu, pattern="^new_token$"))
     application.add_handler(CallbackQueryHandler(create_token_callback, pattern="^new_token_(7|30|90|custom)$"))
     application.add_handler(CallbackQueryHandler(list_tokens, pattern="^list_tokens$"))
@@ -1235,7 +1188,7 @@ def main():
     application.add_handler(CallbackQueryHandler(enable_token, pattern="^enable_token$"))
     application.add_handler(CallbackQueryHandler(stats_callback, pattern="^stats$"))
     application.add_handler(CallbackQueryHandler(refresh_panel, pattern="^refresh_panel$"))
-    application.add_handler(CallbackQueryHandler(panel, pattern="^panel$"))
+    application.add_handler(CallbackQueryHandler(panel, pattern="^panel$"))  # back
 
     # টেক্সট ইনপুট (কাস্টম টোকেন, টোকেন ইনফো ইত্যাদি)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_token))
@@ -1246,9 +1199,7 @@ def main():
     # সাধারণ ইউজারদের ইগনোর
     application.add_handler(MessageHandler(filters.ALL, ignore_non_admin), group=1)
 
-    loop = asyncio.get_event_loop()
-    loop.create_task(monitor_loop(application))
-
+    # বট চালু
     logger.info("🚀 Bot started. Press Ctrl+C to stop.")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
