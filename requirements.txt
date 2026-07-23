@@ -1,0 +1,4 @@
+python-telegram-bot>=20.0
+playwright
+beautifulsoup4
+flask
