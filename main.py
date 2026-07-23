@@ -28,8 +28,8 @@ COOKIE_FILE = "cookies.json"
 DB_FILE = "otp.db"
 API_PORT = 5080
 
-CHANNEL_URL = "https://t.me/your_channel"
-BOT_URL = "https://t.me/your_bot"
+CHANNEL_URL = "https://t.me/RHT_NUMBER"
+BOT_URL = "https://t.me/akane690bot"
 
 # ================= EMOJIS =================
 EMOJI = {
@@ -87,7 +87,7 @@ def panel_button(text, callback, emoji_key, style=None):
         icon_custom_emoji_id=get_custom_emoji(emoji_key)
     )
 
-# ================= COUNTRY MAP =================
+# ================= ALL COUNTRIES MAP (full) =================
 COUNTRY_CODE_MAP = {
     "1": ("US", "🇺🇸", "USA"),
     "7": ("RU", "🇷🇺", "RUSSIA"),
@@ -259,6 +259,7 @@ COUNTRY_CODE_MAP = {
     "996": ("KG", "🇰🇬", "KYRGYZSTAN"),
     "998": ("UZ", "🇺🇿", "UZBEKISTAN"),
 }
+
 ISO_TO_INFO = {v[0]: (v[1], v[2]) for v in COUNTRY_CODE_MAP.values()}
 NAME_TO_ISO = {}
 for code, (iso, flag, name) in COUNTRY_CODE_MAP.items():
@@ -731,6 +732,51 @@ def latest_otp_api():
         "Sms": "OTP found successfully"
     })
 
+@api_app.route('/all_otp', methods=['GET'])
+def all_otp_api():
+    token = request.args.get('token')
+    if not token:
+        return jsonify({"status": "error", "error": "missing_token", "message": "Token required"}), 400
+    info = get_token_info(token)
+    if not info or info["is_active"] != 1 or info["expires_at"] < datetime.now().strftime("%Y-%m-%d %H:%M:%S"):
+        return jsonify({"status": "error", "error": "invalid_token", "message": "Invalid or expired token"}), 401
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute(
+        "SELECT number, otp, service, country, country_code, timestamp, full_message FROM messages ORDER BY timestamp DESC LIMIT 25"
+    )
+    rows = c.fetchall()
+    conn.close()
+
+    if not rows:
+        return jsonify({
+            "status": "not_found",
+            "data": {"total": 0, "otps": []},
+            "Sms": "No OTPs found"
+        })
+
+    otps = []
+    for row in rows:
+        otps.append({
+            "number": row["number"],
+            "otp": row["otp"],
+            "timestamp": row["timestamp"],
+            "service": row["service"],
+            "country": row["country"],
+            "country_code": row.get("country_code", ""),
+            "message": row["full_message"]
+        })
+
+    return jsonify({
+        "status": "success",
+        "data": {
+            "total": len(otps),
+            "otps": otps
+        },
+        "Sms": f"Found {len(otps)} recent OTPs"
+    })
+
 @api_app.route('/stats', methods=['GET'])
 def api_stats():
     token = request.args.get('token')
@@ -950,7 +996,6 @@ async def new_token_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
-# ========== FIXED: Token creation messages use plain text emojis ==========
 @admin_only
 async def create_token_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -964,7 +1009,6 @@ async def create_token_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 days = days_map[query.data.split("_")[2]]
                 token, created, expires = create_token(f"Token_{datetime.now().strftime('%Y%m%d')}", days)
 
-                # Plain text emojis to avoid "Document_invalid" error
                 msg = (
                     f"✅ <b>New API token created!</b>\n\n"
                     f"ℹ️ Name: <code>Token_{datetime.now().strftime('%Y%m%d')}</code>\n"
@@ -976,7 +1020,6 @@ async def create_token_callback(update: Update, context: ContextTypes.DEFAULT_TY
                     f"<code>/get_otp?number=NUMBER&token={token}</code>"
                 )
                 await query.message.reply_text(msg, parse_mode="HTML")
-                # Update panel message to show success
                 await query.edit_message_text(
                     "✅ Token created successfully! Check the new message above.",
                     reply_markup=InlineKeyboardMarkup([[panel_button("Back", "panel", "BACK")]])
@@ -1022,7 +1065,6 @@ async def handle_custom_token(update: Update, context: ContextTypes.DEFAULT_TYPE
     except ValueError:
         await update.message.reply_text("❌ Invalid date format. Use YYYY-MM-DD", parse_mode="HTML")
 
-# ========== Remaining handlers (unchanged) ==========
 @admin_only
 async def list_tokens(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
