@@ -260,7 +260,9 @@ COUNTRY_CODE_MAP = {
     "998": ("UZ", "🇺🇿", "UZBEKISTAN"),
 }
 
-ISO_TO_INFO = {iso: (flag, name) for iso, flag, name in COUNTRY_CODE_MAP.items() if iso}
+# ===== ফিক্স: ISO_TO_INFO এবং NAME_TO_ISO সঠিকভাবে তৈরি =====
+# আগে এই লাইনে এরর ছিল, এখন ঠিক করা হলো
+ISO_TO_INFO = {v[0]: (v[1], v[2]) for v in COUNTRY_CODE_MAP.values()}
 NAME_TO_ISO = {}
 for code, (iso, flag, name) in COUNTRY_CODE_MAP.items():
     NAME_TO_ISO[name.lower()] = iso
@@ -874,7 +876,7 @@ async def country_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if iso not in ISO_TO_INFO:
         await update.message.reply_text(f"❌ Invalid ISO code: {iso}")
         return
-    # We'll just respond, for now, emoji storage not fully implemented
+    # For now, we just respond; emoji storage not fully implemented
     await update.message.reply_text(f"✅ {iso} emoji set to <code>{eid}</code> (temporary)", parse_mode="HTML")
 
 @admin_only
