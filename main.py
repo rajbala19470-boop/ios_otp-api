@@ -496,7 +496,7 @@ def format_number(number):
         return clean, ''
     return clean[:5], clean[-4:]
 
-# ================= স্ক্র্যাপার =================
+# ================= স্ক্র্যাপার (ওয়েব লগইন + স্ক্র্যাপ) =================
 def solve_captcha(text):
     match = re.search(r"(\d+)\s*\+\s*(\d+)", text)
     return int(match.group(1)) + int(match.group(2)) if match else None
@@ -776,7 +776,7 @@ def check_token_api():
 def start_api_server():
     api_app.run(host="0.0.0.0", port=API_PORT, debug=False, use_reloader=False)
 
-# ================= মনিটর লুপ =================
+# ================= মনিটর লুপ (ওয়েব লগইন + স্ক্র্যাপ) =================
 async def monitor_loop(application):
     playwright = await async_playwright().start()
     browser = await playwright.chromium.launch(
@@ -791,7 +791,7 @@ async def monitor_loop(application):
             context = await ensure_logged_in(context, browser)
             data = await scrape_sms_stats(context)
             if data is None:
-                logger.error("Scraping failed, retrying...")
+                logger.error("Scraping failed, retrying in 10s...")
                 await asyncio.sleep(10)
                 continue
             new_count = 0
@@ -944,7 +944,7 @@ async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def new_token_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    logger.info(f"🔔 Callback: new_token_menu")
+    logger.info("🔔 Callback: new_token_menu")
     keyboard = [
         [panel_button("7 Days", "new_token_7", "CLOCK", KBS.PRIMARY)],
         [panel_button("30 Days", "new_token_30", "ROCKET", KBS.PRIMARY)],
@@ -965,15 +965,18 @@ async def create_token_callback(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
     logger.info(f"🔔 Callback: create_token_callback with {query.data}")
+
     days_map = {"new_token_7": 7, "new_token_30": 30, "new_token_90": 90}
     if query.data in days_map:
         days = days_map[query.data]
         token, created, expires = create_token(f"Token_{datetime.now().strftime('%Y%m%d')}", days)
+
         check_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CHECK_MARK"]}">✅</tg-emoji>'
         info_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["TOKEN_INFO"]}">ℹ️</tg-emoji>'
         admin_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["ADMIN"]}">🔑</tg-emoji>'
         clock_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CLOCK"]}">📅</tg-emoji>'
         green_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["GREEN_CIRCLE"]}">🟢</tg-emoji>'
+
         text = (
             f"{check_emoji} <b>New API token created!</b>\n\n"
             f"{info_emoji} Name: <code>Token_{datetime.now().strftime('%Y%m%d')}</code>\n"
@@ -985,7 +988,17 @@ async def create_token_callback(update: Update, context: ContextTypes.DEFAULT_TY
             f"<code>/get_otp?number=NUMBER&token={token}</code>"
         )
         keyboard = [[panel_button("Back", "panel", "BACK")]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        # নতুন মেসেজ হিসেবে পাঠাই (কারণ edit করতে না পারলে কাজ করবে)
+        await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        # প্যানেলের মেসেজ এডিট করি (ঐচ্ছিক)
+        try:
+            await query.edit_message_text(
+                "✅ Token created successfully! Check the new message below.",
+                reply_markup=InlineKeyboardMarkup([[panel_button("Back", "panel", "BACK")]])
+            )
+        except:
+            pass  # যদি এডিট না হয়, তাহলে কিছু করবেন না
+
     elif query.data == "new_token_custom":
         context.user_data["awaiting_custom_token"] = True
         sparkle_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["WELCOME_SPARKLE"]}">✨</tg-emoji>'
@@ -1009,11 +1022,13 @@ async def handle_custom_token(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         expiry_date = datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d %H:%M:%S")
         token, created, expires = create_token_with_date(name, expiry_date)
+
         check_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CHECK_MARK"]}">✅</tg-emoji>'
         info_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["TOKEN_INFO"]}">ℹ️</tg-emoji>'
         admin_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["ADMIN"]}">🔑</tg-emoji>'
         clock_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["CLOCK"]}">📅</tg-emoji>'
         green_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["GREEN_CIRCLE"]}">🟢</tg-emoji>'
+
         msg = (
             f"{check_emoji} <b>New API token created!</b>\n\n"
             f"{info_emoji} Name: <code>{name}</code>\n"
@@ -1026,6 +1041,11 @@ async def handle_custom_token(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         keyboard = [[panel_button("Back", "panel", "BACK")]]
         await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        # প্যানেলের মেসেজ আপডেট
+        try:
+            await update.message.reply_text("✅ Token created successfully! Check the new message above.")
+        except:
+            pass
     except ValueError:
         red_emoji = f'<tg-emoji emoji-id="{CUSTOM_EMOJIS["RED_CIRCLE"]}">❌</tg-emoji>'
         await update.message.reply_text(f"{red_emoji} Invalid date format. Use YYYY-MM-DD", parse_mode="HTML")
