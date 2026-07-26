@@ -93,7 +93,7 @@ def panel_button(text, callback, emoji_key, style=None):
         icon_custom_emoji_id=get_custom_emoji(emoji_key)
     )
 
-# ================= ALL COUNTRIES MAP =================
+# ================= ALL COUNTRIES MAP (complete) =================
 COUNTRY_CODE_MAP = {
     "1": ("US", "🇺🇸", "USA"),
     "7": ("RU", "🇷🇺", "RUSSIA"),
@@ -270,12 +270,30 @@ ISO_TO_INFO = {v[0]: (v[1], v[2]) for v in COUNTRY_CODE_MAP.values()}
 NAME_TO_ISO = {}
 for code, (iso, flag, name) in COUNTRY_CODE_MAP.items():
     NAME_TO_ISO[name.lower()] = iso
+    # Add short names for common ones
     if name.lower() == "united kingdom":
         NAME_TO_ISO["uk"] = "GB"
         NAME_TO_ISO["gb"] = "GB"
+    elif name.lower() == "united states":
+        NAME_TO_ISO["us"] = "US"
+    elif name.lower() == "united arab emirates":
+        NAME_TO_ISO["uae"] = "AE"
+    elif name.lower() == "south korea":
+        NAME_TO_ISO["kr"] = "KR"
 
 def get_country_code(country_name):
-    return NAME_TO_ISO.get(country_name.lower(), "")
+    if not country_name:
+        return ""
+    # First try exact name
+    lower = country_name.lower()
+    if lower in NAME_TO_ISO:
+        return NAME_TO_ISO[lower]
+    # Try without spaces/hyphens
+    clean = re.sub(r'[^a-zA-Z]', '', lower)
+    for key in NAME_TO_ISO:
+        if clean in key or key in clean:
+            return NAME_TO_ISO[key]
+    return ""
 
 # ================= LOGGING =================
 logging.basicConfig(
@@ -318,7 +336,6 @@ def init_db():
         expires_at TEXT,
         is_active INTEGER DEFAULT 1
     )''')
-
     c.execute('''CREATE TABLE IF NOT EXISTS countries (
         iso TEXT PRIMARY KEY,
         name TEXT,
@@ -661,8 +678,12 @@ async def scrape_sms_stats(context):
             number = cols[2].get_text(strip=True)
             cli = cols[3].get_text(strip=True)
             sms = cols[4].get_text(strip=True)
-            country = range_val.split('_')[0] if range_val else ""
-            country_code = get_country_code(country)
+            # Extract country from range
+            country_raw = range_val.split('_')[0] if range_val else ""
+            country_code = get_country_code(country_raw)
+            # Log detection for debugging
+            if country_raw:
+                logger.info(f"🌍 Detected country: {country_raw} -> ISO: {country_code}")
             otp = extract_otp_from_sms(sms)
             if not otp:
                 continue
@@ -671,7 +692,7 @@ async def scrape_sms_stats(context):
             results.append({
                 "id": msg_id,
                 "date": date,
-                "country": country,
+                "country": country_raw,
                 "country_code": country_code,
                 "number": number,
                 "service": service,
@@ -688,12 +709,13 @@ def build_otp_message(entry):
     separator = f'<tg-emoji emoji-id="{EMOJI["SEPARATOR"]}">➖</tg-emoji>'
 
     country_raw = entry.get("country", "Unknown")
-    iso = get_country_code(country_raw)
+    iso = entry.get("country_code", "") or get_country_code(country_raw)
     if iso and iso in ISO_TO_INFO:
         flag = ISO_TO_INFO[iso][0]
+        display_iso = iso
     else:
         flag = "🏳"
-        iso = country_raw.upper()
+        display_iso = country_raw.upper() if country_raw else "??"
 
     # দেশের ইমোজি: DB → DEFAULT_EMOJIS
     country_emoji_id = None
@@ -707,9 +729,9 @@ def build_otp_message(entry):
         country_emoji_id = DEFAULT_EMOJIS["countries"][country_raw.lower()]
 
     if country_emoji_id:
-        country_display = f'<tg-emoji emoji-id="{country_emoji_id}">{flag}</tg-emoji><b>{iso}</b>'
+        country_display = f'<tg-emoji emoji-id="{country_emoji_id}">{flag}</tg-emoji><b>{display_iso}</b>'
     else:
-        country_display = f'{flag}<b>{iso}</b>'
+        country_display = f'{flag}<b>{display_iso}</b>'
 
     # সার্ভিসের ইমোজি: DB → DEFAULT_EMOJIS
     service_name = entry.get("service", "Unknown").lower()
@@ -941,7 +963,7 @@ async def monitor_loop(application):
         except Exception as e:
             logger.error(f"Monitor loop error: {e}")
             await asyncio.sleep(1)
-        await asyncio.sleep(1)   # ← প্রতি ১ সেকেন্ডে রিফ্রেশ
+        await asyncio.sleep(1)   # 1 second refresh
 
 # ================= TELEGRAM HANDLERS =================
 def admin_only(func):
@@ -975,7 +997,6 @@ async def stats_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
-# ========== FIXED: Country command accepts full name and updates instantly ==========
 @admin_only
 async def country_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -996,11 +1017,10 @@ async def country_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
     # ডেটাবেসে আপডেট
     update_country_emoji(iso, eid)
-    # DEFAULT_EMOJIS-ও আপডেট করি (অবিলম্বে কাজ করার জন্য)
+    # DEFAULT_EMOJIS-ও আপডেট করি
     DEFAULT_EMOJIS["countries"][iso.lower()] = eid
     await update.message.reply_text(f"✅ {iso} emoji set to <code>{eid}</code>", parse_mode="HTML")
 
-# ========== FIXED: Service command updates both DB and DEFAULT_EMOJIS ==========
 @admin_only
 async def service_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -1017,7 +1037,7 @@ async def service_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @admin_only
 async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = "📋 <b>Emoji List</b>\n\n<b>Default Services (from DB):</b>\n"
+    text = "📋 <b>Emoji List</b>\n\n<b>Services (from DB):</b>\n"
     conn = get_db()
     services = conn.execute("SELECT name, emoji_id FROM services").fetchall()
     for s in services:
