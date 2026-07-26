@@ -19,7 +19,6 @@ DATA_FOLDER = "IOS_PANEL_DATA"
 if not os.path.exists(DATA_FOLDER):
     os.makedirs(DATA_FOLDER)
 
-# Update file paths to be inside DATA_FOLDER
 COOKIE_FILE = os.path.join(DATA_FOLDER, "cookies.json")
 DB_FILE = os.path.join(DATA_FOLDER, "otp.db")
 
@@ -35,8 +34,8 @@ PASSWORD = "otp_work_rakesh"
 
 API_PORT = 5080
 
-CHANNEL_URL = "https://t.me/RHT_NUMBER"
-BOT_URL = "https://t.me/akane690bot"
+CHANNEL_URL = "https://t.me/your_channel"
+BOT_URL = "https://t.me/your_bot"
 
 # ================= EMOJIS =================
 EMOJI = {
@@ -304,15 +303,12 @@ def init_db():
         timestamp TEXT,
         full_message TEXT
     )''')
-    # Add missing columns if any
     c.execute("PRAGMA table_info(messages)")
     columns = [col[1] for col in c.fetchall()]
     if "full_message" not in columns:
         c.execute("ALTER TABLE messages ADD COLUMN full_message TEXT")
-        logger.info("✅ Added missing column 'full_message'")
     if "country_code" not in columns:
         c.execute("ALTER TABLE messages ADD COLUMN country_code TEXT")
-        logger.info("✅ Added missing column 'country_code'")
 
     c.execute('''CREATE TABLE IF NOT EXISTS api_tokens (
         token TEXT PRIMARY KEY,
@@ -321,6 +317,17 @@ def init_db():
         created_at TEXT,
         expires_at TEXT,
         is_active INTEGER DEFAULT 1
+    )''')
+
+    c.execute('''CREATE TABLE IF NOT EXISTS countries (
+        iso TEXT PRIMARY KEY,
+        name TEXT,
+        flag TEXT,
+        emoji_id TEXT
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS services (
+        name TEXT PRIMARY KEY,
+        emoji_id TEXT
     )''')
     conn.commit()
     # Test token
@@ -339,9 +346,7 @@ def is_duplicate(msg_id):
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT id FROM messages WHERE id=?", (msg_id,))
-    exists = c.fetchone() is not None
-    conn.close()
-    return exists
+    return c.fetchone() is not None
 
 def save_message(msg_id, number, otp, service, country, country_code, timestamp, full_message):
     conn = get_db()
@@ -381,9 +386,7 @@ def get_otp_count():
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM messages")
-    count = c.fetchone()[0]
-    conn.close()
-    return count
+    return c.fetchone()[0]
 
 def get_token_info(token):
     conn = get_db()
@@ -457,6 +460,37 @@ def get_inactive_count():
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM api_tokens WHERE is_active=0 OR expires_at <= datetime('now')")
     return c.fetchone()[0]
+
+def get_country_info(iso):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT * FROM countries WHERE iso=?", (iso,))
+    row = c.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def update_country_emoji(iso, emoji_id):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO countries (iso, name, flag, emoji_id) VALUES (?,?,?,?)",
+              (iso, "", "", emoji_id))
+    conn.commit()
+    conn.close()
+
+def get_service_info(name):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT * FROM services WHERE name=?", (name,))
+    row = c.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def update_service_emoji(name, emoji_id):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO services (name, emoji_id) VALUES (?,?)", (name, emoji_id))
+    conn.commit()
+    conn.close()
 
 # ================= OTP EXTRACTION =================
 def extract_otp_from_sms(sms_text):
@@ -648,7 +682,7 @@ async def scrape_sms_stats(context):
     finally:
         await page.close()
 
-# ================= OTP MESSAGE FORMAT =================
+# ================= OTP MESSAGE FORMAT (FIXED) =================
 def build_otp_message(entry):
     prefix = f'<tg-emoji emoji-id="{EMOJI["PREFIX"]}">🤖</tg-emoji>'
     separator = f'<tg-emoji emoji-id="{EMOJI["SEPARATOR"]}">➖</tg-emoji>'
@@ -661,10 +695,15 @@ def build_otp_message(entry):
         flag = "🏳"
         iso = country_raw.upper()
 
+    # দেশের ইমোজি: DB → DEFAULT_EMOJIS
     country_emoji_id = None
-    if iso and iso.lower() in DEFAULT_EMOJIS["countries"]:
+    if iso:
+        country_info = get_country_info(iso)
+        if country_info and country_info.get("emoji_id"):
+            country_emoji_id = country_info["emoji_id"]
+    if not country_emoji_id and iso and iso.lower() in DEFAULT_EMOJIS["countries"]:
         country_emoji_id = DEFAULT_EMOJIS["countries"][iso.lower()]
-    elif country_raw.lower() in DEFAULT_EMOJIS["countries"]:
+    if not country_emoji_id and country_raw.lower() in DEFAULT_EMOJIS["countries"]:
         country_emoji_id = DEFAULT_EMOJIS["countries"][country_raw.lower()]
 
     if country_emoji_id:
@@ -672,10 +711,16 @@ def build_otp_message(entry):
     else:
         country_display = f'{flag}<b>{iso}</b>'
 
+    # সার্ভিসের ইমোজি: DB → DEFAULT_EMOJIS
     service_name = entry.get("service", "Unknown").lower()
     service_display = f'<b>{service_name.capitalize()}</b>'
-    if service_name in DEFAULT_EMOJIS["services"]:
+    service_emoji_id = None
+    service_info = get_service_info(service_name.capitalize())
+    if service_info and service_info.get("emoji_id"):
+        service_emoji_id = service_info["emoji_id"]
+    if not service_emoji_id and service_name in DEFAULT_EMOJIS["services"]:
         service_emoji_id = DEFAULT_EMOJIS["services"][service_name]
+    if service_emoji_id:
         service_display = f'<tg-emoji emoji-id="{service_emoji_id}">🔧</tg-emoji>'
     else:
         service_display = f'#{service_name.capitalize()}'
@@ -845,7 +890,7 @@ def check_token_api():
 def start_api_server():
     api_app.run(host="0.0.0.0", port=API_PORT, debug=False, use_reloader=False)
 
-# ================= MONITOR LOOP =================
+# ================= MONITOR LOOP (1 SECOND REFRESH) =================
 async def monitor_loop(application):
     playwright = await async_playwright().start()
     browser = await playwright.chromium.launch(
@@ -860,8 +905,8 @@ async def monitor_loop(application):
             context = await ensure_logged_in(context, browser)
             data = await scrape_sms_stats(context)
             if data is None:
-                logger.error("Scraping failed, retrying in 10s...")
-                await asyncio.sleep(10)
+                logger.error("Scraping failed, retrying in 1s...")
+                await asyncio.sleep(1)
                 continue
             new_count = 0
             for entry in data:
@@ -895,8 +940,8 @@ async def monitor_loop(application):
                 logger.debug("No new OTPs.")
         except Exception as e:
             logger.error(f"Monitor loop error: {e}")
-            await asyncio.sleep(10)
-        await asyncio.sleep(3)
+            await asyncio.sleep(1)
+        await asyncio.sleep(1)   # ← প্রতি ১ সেকেন্ডে রিফ্রেশ
 
 # ================= TELEGRAM HANDLERS =================
 def admin_only(func):
@@ -913,8 +958,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📌 <b>Commands:</b>\n"
         "/panel - Open API Management Panel\n"
         "/stats - View bot statistics\n"
-        "/country ISO|EMOJI_ID - Set country emoji\n"
-        "/service NAME|EMOJI_ID - Set service emoji\n"
+        "/country ISO|EMOJI_ID  or  /country CountryName|EMOJI_ID\n"
+        "/service NAME|EMOJI_ID\n"
         "/list - List all emoji settings",
         parse_mode="HTML"
     )
@@ -930,41 +975,59 @@ async def stats_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(text, parse_mode="HTML")
 
+# ========== FIXED: Country command accepts full name and updates instantly ==========
 @admin_only
 async def country_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Usage: /country ISO|EMOJI_ID\nExample: /country GB|123456789")
+        await update.message.reply_text("Usage: /country ISO|EMOJI_ID\nExample: /country GB|123456789\nOr: /country Tajikistan|123456789")
         return
     parts = " ".join(context.args).split("|")
     if len(parts) != 2:
-        await update.message.reply_text("Invalid format. Use ISO|EMOJI_ID")
+        await update.message.reply_text("Invalid format. Use ISO|EMOJI_ID or CountryName|EMOJI_ID")
         return
-    iso, eid = parts[0].strip().upper(), parts[1].strip()
+    name_or_iso, eid = parts[0].strip(), parts[1].strip()
+    iso = name_or_iso.upper()
     if iso not in ISO_TO_INFO:
-        await update.message.reply_text(f"❌ Invalid ISO code: {iso}")
-        return
-    await update.message.reply_text(f"✅ {iso} emoji set to <code>{eid}</code> (temporary)", parse_mode="HTML")
+        lower_name = name_or_iso.lower()
+        if lower_name in NAME_TO_ISO:
+            iso = NAME_TO_ISO[lower_name]
+        else:
+            await update.message.reply_text(f"❌ Invalid country: {name_or_iso}")
+            return
+    # ডেটাবেসে আপডেট
+    update_country_emoji(iso, eid)
+    # DEFAULT_EMOJIS-ও আপডেট করি (অবিলম্বে কাজ করার জন্য)
+    DEFAULT_EMOJIS["countries"][iso.lower()] = eid
+    await update.message.reply_text(f"✅ {iso} emoji set to <code>{eid}</code>", parse_mode="HTML")
 
+# ========== FIXED: Service command updates both DB and DEFAULT_EMOJIS ==========
 @admin_only
 async def service_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Usage: /service NAME|EMOJI_ID\nExample: /service Casushi|123456789")
+        await update.message.reply_text("Usage: /service NAME|EMOJI_ID\nExample: /service Paypal|123456789")
         return
     parts = " ".join(context.args).split("|")
     if len(parts) != 2:
         await update.message.reply_text("Invalid format. Use NAME|EMOJI_ID")
         return
     name, eid = parts[0].strip().capitalize(), parts[1].strip()
-    await update.message.reply_text(f"✅ {name} emoji set to <code>{eid}</code> (temporary)", parse_mode="HTML")
+    update_service_emoji(name, eid)
+    DEFAULT_EMOJIS["services"][name.lower()] = eid
+    await update.message.reply_text(f"✅ {name} emoji set to <code>{eid}</code>", parse_mode="HTML")
 
 @admin_only
 async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = "📋 <b>Emoji List</b>\n\n<b>Default Services:</b>\n"
-    for srv, eid in DEFAULT_EMOJIS["services"].items():
-        text += f"  {srv.capitalize()}: <code>{eid}</code>\n"
-    text += "\n<b>Default Countries:</b>\n"
-    for cnt, eid in DEFAULT_EMOJIS["countries"].items():
-        text += f"  {cnt.upper()}: <code>{eid}</code>\n"
+    text = "📋 <b>Emoji List</b>\n\n<b>Default Services (from DB):</b>\n"
+    conn = get_db()
+    services = conn.execute("SELECT name, emoji_id FROM services").fetchall()
+    for s in services:
+        text += f"  {s['name']}: <code>{s['emoji_id'] or 'not set'}</code>\n"
+    text += "\n<b>Countries (from DB):</b>\n"
+    countries = conn.execute("SELECT iso, emoji_id FROM countries WHERE emoji_id IS NOT NULL").fetchall()
+    for c in countries:
+        flag = ISO_TO_INFO.get(c['iso'], ("", ""))[0] or "🏳"
+        text += f"  {flag} {c['iso']}: <code>{c['emoji_id']}</code>\n"
+    conn.close()
     await update.message.reply_text(text, parse_mode="HTML")
 
 @admin_only
@@ -1245,7 +1308,6 @@ def main():
 
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Command handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("panel", panel))
     application.add_handler(CommandHandler("stats", stats_text))
@@ -1253,7 +1315,6 @@ def main():
     application.add_handler(CommandHandler("service", service_command))
     application.add_handler(CommandHandler("list", list_command))
 
-    # Callback handlers
     application.add_handler(CallbackQueryHandler(new_token_menu, pattern="^new_token$"))
     application.add_handler(CallbackQueryHandler(create_token_callback, pattern="^new_token_(7|30|90|custom)$"))
     application.add_handler(CallbackQueryHandler(list_tokens, pattern="^list_tokens$"))
@@ -1264,16 +1325,13 @@ def main():
     application.add_handler(CallbackQueryHandler(refresh_panel, pattern="^refresh_panel$"))
     application.add_handler(CallbackQueryHandler(panel, pattern="^panel$"))
 
-    # Text input handlers
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_token))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_token_info))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_remove_token))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_enable_token))
 
-    # Ignore non-admin messages
     application.add_handler(MessageHandler(filters.ALL, ignore_non_admin), group=1)
 
-    # Start monitor loop
     loop = asyncio.get_event_loop()
     loop.create_task(monitor_loop(application))
 
