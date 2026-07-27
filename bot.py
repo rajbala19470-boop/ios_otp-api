@@ -31,7 +31,7 @@ MIN_WITHDRAW = 0.1  # USD
 
 # Admin contacts
 ADMIN_WHATSAPP = "https://wa.me/8801962636806"
-ADMIN_TELEGRAM = "t.me/WONER_OF_RHT"
+ADMIN_TELEGRAM = "t.me/SR_ADMIN_RAKESH"
 
 # Second admin contacts (fill later)
 ADMIN2_WHATSAPP = ""
@@ -39,8 +39,8 @@ ADMIN2_TELEGRAM = ""
 
 # Group OTP settings
 GROUP_ID = -1004380384761
-CHANNEL_URL = "https://t.me/your_channel"
-BOT_URL = "https://t.me/your_bot"
+CHANNEL_URL = "https://t.me/+76nQ1vvAzy04ZWE0"
+BOT_URL = "https://t.me/SrNumberHubBOT"
 
 # Emoji constants for group OTP (from your reference bot)
 EMOJI_PREFIX = "4958725487682650920"
