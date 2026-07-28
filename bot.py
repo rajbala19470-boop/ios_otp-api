@@ -45,8 +45,9 @@ STATS_URL = "http://139.99.9.120/ints/client/SMSCDRStats"
 USERNAME = "otp_work_rakesh"
 PASSWORD = "otp_work_rakesh"
 
-API_PORT = 6080
-REFRESH_INTERVAL = 2  # seconds
+API_PORT = 6082                 # New port (not 5000 or 6080)
+API_HOST = "127.0.0.1"           # Bind to localhost only
+REFRESH_INTERVAL = 2
 
 # ================= COUNTRY MAP (unchanged) =================
 COUNTRY_CODE_MAP = {
@@ -547,7 +548,7 @@ async def login_and_save_cookie(playwright):
     await browser.close()
     return True
 
-# ================= LOAD STATS (with enhanced logging) =================
+# ================= LOAD STATS (with debug SMS log) =================
 async def load_stats_with_cookie(playwright):
     if not os.path.exists(COOKIE_FILE):
         logger.warning("⚠️ Cookie file not found")
@@ -566,11 +567,8 @@ async def load_stats_with_cookie(playwright):
         await page.goto(STATS_URL, wait_until="networkidle", timeout=30000)
         await page.wait_for_timeout(2000)
 
-        # চেক করি পেজে টেবিল আছে কিনা
         html = await page.content()
         soup = BeautifulSoup(html, 'html.parser')
-        
-        # টেবিল খুঁজি (dataTable ক্লাস সহ)
         table = soup.select_one('table.dataTable tbody')
         if not table:
             table = soup.find('table')
@@ -588,9 +586,8 @@ async def load_stats_with_cookie(playwright):
         if total_rows == 0:
             logger.info("ℹ️ Table found but no rows. No data yet.")
             await browser.close()
-            return True, []  # সফল কিন্তু ডেটা নেই
+            return True, []
 
-        # কলাম সংখ্যা চেক করি (প্রথম সারি থেকে)
         first_row = rows[0]
         first_cols = first_row.find_all('td')
         col_count = len(first_cols)
@@ -601,7 +598,6 @@ async def load_stats_with_cookie(playwright):
             await browser.close()
             return False, None
 
-        # ডেটা পার্স করি
         results = []
         otp_count = 0
         for row in rows:
@@ -617,14 +613,16 @@ async def load_stats_with_cookie(playwright):
             number = cols[2].get_text(strip=True)
             cli = cols[3].get_text(strip=True)
             sms = cols[4].get_text(strip=True)
-            # cols[5] = Currency (not needed)
-            # cols[6] = My Payout (not needed)
-
+            
+            # ডিবাগ লগ – SMS এর প্রথম ২০০ অক্ষর দেখান
+            logger.info(f"📝 SMS: {sms[:200]}...")
+            
             country = range_val
             country_code = get_country_code(country)
 
             otp = extract_otp_from_sms(sms)
             if not otp:
+                logger.info(f"⚠️ No OTP in SMS: {sms[:100]}")
                 continue
 
             otp_count += 1
@@ -646,7 +644,6 @@ async def load_stats_with_cookie(playwright):
                 "otp": otp
             })
 
-        # লগ দেখাই
         if total_rows > 0:
             logger.info(f"✅ Data Rows Loaded")
             logger.info(f"🔥 Found {total_rows} Rows")
@@ -688,7 +685,7 @@ async def monitor_loop(application):
             success, data = await load_stats_with_cookie(playwright)
 
             if success:
-                consecutive_failures = 0  # পেজ লোড সফল হলে রিসেট
+                consecutive_failures = 0
                 if data and len(data) > 0:
                     new_count = 0
                     for entry in data:
@@ -737,7 +734,6 @@ async def monitor_loop(application):
                     else:
                         logger.error("❌ Re-login failed. Will retry later.")
 
-            # এই লাইনটি সব সময় দেখাবে
             logger.info("🕛 Waiting for OTPs...")
             await asyncio.sleep(REFRESH_INTERVAL)
 
@@ -752,8 +748,44 @@ async def monitor_loop(application):
                 consecutive_failures = 0
             await asyncio.sleep(REFRESH_INTERVAL)
 
-# ================= API SERVER =================
+# ================= API SERVER (host=127.0.0.1, port=6082) =================
 api_app = Flask(__name__)
+
+@api_app.route('/ping', methods=['GET'])
+def ping():
+    return jsonify({"status": "ok", "message": "API is running!"})
+
+@api_app.route('/all_otp', methods=['GET'])
+def all_otp_api():
+    token = request.args.get('token')
+    if not token:
+        return jsonify({"status": "error", "error": "missing_token", "message": "Token required"}), 400
+    info = get_token_info(token)
+    if not info or info["is_active"] != 1 or info["expires_at"] < datetime.now().strftime("%Y-%m-%d %H:%M:%S"):
+        return jsonify({"status": "error", "error": "invalid_token", "message": "Invalid or expired token"}), 401
+    try:
+        rows = get_all_otps(50)
+        if not rows:
+            return jsonify({"status": "success", "Sms": "No OTPs found", "data": {"total": 0, "otps": []}})
+        formatted = []
+        for row in rows:
+            formatted.append({
+                "number": row.get("number", ""),
+                "otp": row.get("otp", ""),
+                "timestamp": row.get("timestamp", ""),
+                "service": row.get("service", "UNKNOWN"),
+                "country": row.get("country", "Unknown"),
+                "country_code": row.get("country_code", ""),
+                "message": row.get("full_message", "")
+            })
+        return jsonify({
+            "status": "success",
+            "Sms": f"Found {len(formatted)} recent OTPs",
+            "data": {"total": len(formatted), "otps": formatted}
+        })
+    except Exception as e:
+        logger.error(f"❌ Error in /all_otp: {e}")
+        return jsonify({"status": "error", "error": "internal_error", "message": str(e)}), 500
 
 @api_app.route('/get_otp', methods=['GET'])
 def get_otp_api():
@@ -805,38 +837,6 @@ def latest_otp_api():
         }
     })
 
-@api_app.route('/all_otp', methods=['GET'])
-def all_otp_api():
-    token = request.args.get('token')
-    if not token:
-        return jsonify({"status": "error", "error": "missing_token", "message": "Token required"}), 400
-    info = get_token_info(token)
-    if not info or info["is_active"] != 1 or info["expires_at"] < datetime.now().strftime("%Y-%m-%d %H:%M:%S"):
-        return jsonify({"status": "error", "error": "invalid_token", "message": "Invalid or expired token"}), 401
-    try:
-        rows = get_all_otps(50)
-        if not rows:
-            return jsonify({"status": "success", "Sms": "No OTPs found", "data": {"total": 0, "otps": []}})
-        formatted = []
-        for row in rows:
-            formatted.append({
-                "number": row.get("number", ""),
-                "otp": row.get("otp", ""),
-                "timestamp": row.get("timestamp", ""),
-                "service": row.get("service", "UNKNOWN"),
-                "country": row.get("country", "Unknown"),
-                "country_code": row.get("country_code", ""),
-                "message": row.get("full_message", "")
-            })
-        return jsonify({
-            "status": "success",
-            "Sms": f"Found {len(formatted)} recent OTPs",
-            "data": {"total": len(formatted), "otps": formatted}
-        })
-    except Exception as e:
-        logger.error(f"❌ Error in /all_otp: {e}")
-        return jsonify({"status": "error", "error": "internal_error", "message": str(e)}), 500
-
 @api_app.route('/stats', methods=['GET'])
 def api_stats():
     token = request.args.get('token')
@@ -875,9 +875,10 @@ def check_token_api():
     })
 
 def start_api_server():
-    api_app.run(host="0.0.0.0", port=API_PORT, debug=False, use_reloader=False)
+    logger.info(f"🚀 Starting API server on {API_HOST}:{API_PORT}...")
+    api_app.run(host=API_HOST, port=API_PORT, debug=False, use_reloader=False)
 
-# ================= TELEGRAM HANDLERS (unchanged) =================
+# ================= TELEGRAM HANDLERS =================
 def admin_only(func):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.effective_user.id not in ADMIN_IDS:
@@ -1143,7 +1144,10 @@ async def ignore_non_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     init_db()
     threading.Thread(target=start_api_server, daemon=True).start()
-    logger.info(f"🌐 API Server running on http://0.0.0.0:{API_PORT}")
+    # একটু অপেক্ষা করি API সার্ভার শুরু হওয়ার জন্য
+    import time
+    time.sleep(1)
+    logger.info(f"🌐 API Server running on http://{API_HOST}:{API_PORT}")
 
     application = Application.builder().token(BOT_TOKEN).build()
 
