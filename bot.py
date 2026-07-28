@@ -13,7 +13,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 
-# ================= LOGGING (Only Emoji - No API Call Log) =================
+# ================= LOGGING =================
 logging.getLogger("telegram").setLevel(logging.ERROR)
 logging.getLogger("httpx").setLevel(logging.ERROR)
 logging.getLogger("httpcore").setLevel(logging.ERROR)
@@ -28,7 +28,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ================= FOLDER =================
-DATA_FOLDER = "ISM_PANEL_DATA"
+DATA_FOLDER = "IOS_PANEL_DATA"
 if not os.path.exists(DATA_FOLDER):
     os.makedirs(DATA_FOLDER)
 
@@ -36,7 +36,7 @@ COOKIE_FILE = os.path.join(DATA_FOLDER, "cookies.json")
 DB_FILE = os.path.join(DATA_FOLDER, "otp.db")
 JSON_FILE = os.path.join(DATA_FOLDER, "otp_log.json")
 
-# ================= CONFIG (UPDATED) =================
+# ================= CONFIG =================
 BOT_TOKEN = "8901961818:AAFbhaZIoY13b1nmcuhLOoBpK0M9zgFUJgs"
 ADMIN_IDS = [8744359777]
 
@@ -45,10 +45,10 @@ STATS_URL = "http://139.99.9.120/ints/client/SMSCDRStats"
 USERNAME = "otp_work_rakesh"
 PASSWORD = "otp_work_rakesh"
 
-API_PORT = 6080
-REFRESH_INTERVAL = 2  # seconds
+API_PORT = 6080          # changed to 6080
+REFRESH_INTERVAL = 2
 
-# ================= FULL COUNTRY MAP (unchanged) =================
+# ================= COUNTRY MAP (unchanged) =================
 COUNTRY_CODE_MAP = {
     "1": ("US", "🇺🇸", "USA"),
     "7": ("RU", "🇷🇺", "RUSSIA"),
@@ -499,9 +499,8 @@ def detect_service_from_sms(msg):
                 return srv
     return "UNKNOWN"
 
-# ================= COOKIE-BASED LOGIN & SCRAPE =================
+# ================= LOGIN & COOKIE =================
 async def login_and_save_cookie(playwright):
-    """শুধুমাত্র প্রথমবার বা কুকি এক্সপায়ার হলে লগইন করে কুকি সেভ করে (headless)"""
     browser = await playwright.chromium.launch(
         headless=True,
         slow_mo=0,
@@ -544,9 +543,8 @@ async def login_and_save_cookie(playwright):
     await browser.close()
     return True
 
-# ================= UPDATED: load_stats_with_cookie (robust) =================
+# ================= IMPROVED LOAD STATS (FIX) =================
 async def load_stats_with_cookie(playwright):
-    """কুকি দিয়ে পেজ লোড (headless) + রোবাস্ট ওয়েট"""
     if not os.path.exists(COOKIE_FILE):
         logger.warning("⚠️ Cookie file not found")
         return False, None
@@ -564,18 +562,33 @@ async def load_stats_with_cookie(playwright):
         await page.goto(STATS_URL, wait_until="networkidle", timeout=30000)
         await page.wait_for_timeout(2000)
 
-        # টেবিলের প্রথম রো আসার জন্য অপেক্ষা (১৫ সেকেন্ড)
+        # অপেক্ষা করি যতক্ষণ না টেবিলে একটি সারি দৃশ্যমান হয় এবং প্রথম কলামে ডেট (YYYY-MM-DD) প্যাটার্ন থাকে
         try:
-            await page.wait_for_selector('table.dataTable tbody tr', timeout=15000)
-            logger.info("✅ Table row found.")
+            await page.wait_for_function(
+                """() => {
+                    const rows = document.querySelectorAll('table.dataTable tbody tr');
+                    for (let row of rows) {
+                        const firstCell = row.querySelector('td');
+                        if (firstCell) {
+                            const text = firstCell.innerText.trim();
+                            if (/^\\d{4}-\\d{2}-\\d{2}/.test(text)) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                }""",
+                timeout=20000,
+                polling=200
+            )
+            logger.info("✅ Data rows with date pattern found.")
         except Exception as e:
-            logger.warning(f"⏳ Table row not found: {e}. Dumping HTML for debug.")
+            logger.warning(f"⏳ Data rows not found: {e}. Dumping HTML for debug.")
             html_dump = await page.content()
             with open("debug_table_not_found.html", "w", encoding="utf-8") as f:
                 f.write(html_dump)
             logger.info("📄 HTML dumped to debug_table_not_found.html")
-            # তবুও আমরা চেষ্টা করবো পার্স করার
-            pass
+            # তবুও চেষ্টা করবো পার্স করার
 
         # পার্সিং
         html = await page.content()
@@ -642,7 +655,7 @@ async def load_stats_with_cookie(playwright):
         await browser.close()
         return False, None
 
-# ================= MONITOR LOOP (headless) =================
+# ================= MONITOR LOOP =================
 async def monitor_loop(application):
     playwright = await async_playwright().start()
 
@@ -1109,7 +1122,7 @@ async def ignore_non_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     init_db()
     threading.Thread(target=start_api_server, daemon=True).start()
-    logger.info("🌐 API Server running on http://0.0.0.0:5000")
+    logger.info(f"🌐 API Server running on http://0.0.0.0:{API_PORT}")
 
     application = Application.builder().token(BOT_TOKEN).build()
 
