@@ -23,7 +23,7 @@ DB_FILE = os.path.join(DATA_FOLDER, "otp.db")
 JSON_LOG_FILE = os.path.join(DATA_FOLDER, "otp_log.json")
 
 # ================= CONFIG =================
-BOT_TOKEN = "8858891566:AAEsH_FfBNTkz5b2g814vxKVxwcO8kOm5AU"
+BOT_TOKEN = "8901961818:AAFbhaZIoY13b1nmcuhLOoBpK0M9zgFUJgs"
 ADMIN_IDS = [8744359777]
 
 LOGIN_URL = "http://139.99.9.120/ints/login"
