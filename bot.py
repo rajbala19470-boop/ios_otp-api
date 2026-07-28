@@ -45,8 +45,8 @@ STATS_URL = "http://139.99.9.120/ints/client/SMSCDRStats"
 USERNAME = "otp_work_rakesh"
 PASSWORD = "otp_work_rakesh"
 
-API_PORT = 5000
-REFRESH_INTERVAL = 2  # seconds
+API_PORT = 6080
+REFRESH_INTERVAL = 4  # seconds
 
 # ================= FULL COUNTRY MAP (unchanged) =================
 COUNTRY_CODE_MAP = {
