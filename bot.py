@@ -24,12 +24,12 @@ JSON_LOG_FILE = os.path.join(DATA_FOLDER, "otp_log.json")
 
 # ================= CONFIG =================
 BOT_TOKEN = "8858891566:AAEsH_FfBNTkz5b2g814vxKVxwcO8kOm5AU"
-ADMIN_IDS = [8744359777]  # only these users can use admin commands
+ADMIN_IDS = [8744359777]
 
-LOGIN_URL = "http://51.75.131.196/ints/login"
-STATS_URL = "http://51.75.131.196/ints/client/SMSCDRStats"
-USERNAME = "otp_work"
-PASSWORD = "otp_work"
+LOGIN_URL = "http://139.99.9.120/ints/login"
+STATS_URL = "http://139.99.9.120/ints/client/SMSCDRStats"
+USERNAME = "otp_work_rakesh"
+PASSWORD = "otp_work_rakesh"
 
 API_PORT = 8000
 
@@ -210,7 +210,6 @@ ISO_TO_INFO = {v[0]: (v[1], v[2]) for v in COUNTRY_CODE_MAP.values()}
 NAME_TO_ISO = {}
 for code, (iso, flag, name) in COUNTRY_CODE_MAP.items():
     NAME_TO_ISO[name.lower()] = iso
-    # Add short names for common ones
     if name.lower() == "united kingdom":
         NAME_TO_ISO["uk"] = "GB"
         NAME_TO_ISO["gb"] = "GB"
@@ -227,7 +226,6 @@ def get_country_code(country_name):
     lower = country_name.lower()
     if lower in NAME_TO_ISO:
         return NAME_TO_ISO[lower]
-    # Try without spaces/hyphens
     clean = re.sub(r'[^a-zA-Z]', '', lower)
     for key in NAME_TO_ISO:
         if clean in key or key in clean:
@@ -276,7 +274,6 @@ def init_db():
         is_active INTEGER DEFAULT 1
     )''')
     conn.commit()
-    # Test token
     c.execute("SELECT token FROM api_tokens WHERE token='test_token_123'")
     if not c.fetchone():
         expiry = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
@@ -409,14 +406,12 @@ def get_inactive_count():
 
 # ================= JSON LOGGING =================
 def append_to_json_log(entry):
-    """Append a new OTP entry to the JSON log file."""
     try:
         if os.path.exists(JSON_LOG_FILE):
             with open(JSON_LOG_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
         else:
             data = []
-        # Ensure data is a list
         if not isinstance(data, list):
             data = []
         data.append(entry)
@@ -584,17 +579,19 @@ async def scrape_sms_stats(context):
         results = []
         for row in rows:
             cols = row.find_all('td')
-            if len(cols) < 7:
+            if len(cols) < 5:
                 continue
             first = cols[0].get_text(strip=True)
-            if re.match(r'^[\d,]+$', first):
+            if re.match(r'^[\d,]+$', first) or "Total" in first:
                 continue
             date = cols[0].get_text(strip=True)
             range_val = cols[1].get_text(strip=True)
             number = cols[2].get_text(strip=True)
             cli = cols[3].get_text(strip=True)
-            sms = cols[4].get_text(strip=True)
-            # Extract country from range
+            sms_col = 4
+            if len(cols) > 5 and len(cols[5].get_text(strip=True)) > 20:
+                sms_col = 5
+            sms = cols[sms_col].get_text(strip=True)
             country_raw = range_val.split('_')[0] if range_val else ""
             country_code = get_country_code(country_raw)
             if country_raw:
@@ -602,7 +599,10 @@ async def scrape_sms_stats(context):
             otp = extract_otp_from_sms(sms)
             if not otp:
                 continue
-            service = cli.strip() if cli and cli.strip() and cli.upper() not in ["UNKNOWN", "SERVICE", ""] else detect_service_from_sms(sms)
+            if cli and cli.strip() and cli.upper() not in ["UNKNOWN", "SERVICE", ""]:
+                service = cli.strip()
+            else:
+                service = detect_service_from_sms(sms)
             msg_id = f"{date}_{number}_{otp}"
             results.append({
                 "id": msg_id,
@@ -618,7 +618,7 @@ async def scrape_sms_stats(context):
     finally:
         await page.close()
 
-# ================= API SERVER =================
+# ================= API SERVER (without request logging) =================
 api_app = Flask(__name__)
 
 @api_app.route('/get_otp', methods=['GET'])
@@ -780,7 +780,6 @@ async def monitor_loop(application):
             for entry in data:
                 if is_duplicate(entry["id"]):
                     continue
-                # Save to database
                 save_message(
                     entry["id"],
                     entry["number"],
@@ -791,7 +790,6 @@ async def monitor_loop(application):
                     entry["date"],
                     entry["sms"]
                 )
-                # Append to JSON log
                 append_to_json_log({
                     "id": entry["id"],
                     "number": entry["number"],
@@ -811,9 +809,9 @@ async def monitor_loop(application):
         except Exception as e:
             logger.error(f"Monitor loop error: {e}")
             await asyncio.sleep(1)
-        await asyncio.sleep(1)   # 1 second refresh
+        await asyncio.sleep(1)
 
-# ================= TELEGRAM HANDLERS (Admin Panel) =================
+# ================= TELEGRAM HANDLERS =================
 def admin_only(func):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.effective_user.id not in ADMIN_IDS:
