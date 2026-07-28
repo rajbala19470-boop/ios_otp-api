@@ -46,7 +46,7 @@ STATS_URL = "http://139.99.9.120/ints/client/SMSCDRStats"
 USERNAME = "otp_work_rakesh"
 PASSWORD = "otp_work_rakesh"
 
-API_PORT = 6082
+API_PORT = 3672
 API_HOST = "127.0.0.1"
 REFRESH_INTERVAL = 2
 
