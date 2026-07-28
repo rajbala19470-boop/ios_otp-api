@@ -588,6 +588,7 @@ async def scrape_sms_stats(context):
             range_val = cols[1].get_text(strip=True)
             number = cols[2].get_text(strip=True)
             cli = cols[3].get_text(strip=True)
+            # Determine SMS column: check if col 5 exists and has longer text (>20 chars), else col 4
             sms_col = 4
             if len(cols) > 5 and len(cols[5].get_text(strip=True)) > 20:
                 sms_col = 5
