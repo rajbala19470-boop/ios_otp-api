@@ -1,6 +1,7 @@
 import asyncio
 import re
 import os
+import sys
 import json
 import sqlite3
 import logging
@@ -45,11 +46,30 @@ STATS_URL = "http://139.99.9.120/ints/client/SMSCDRStats"
 USERNAME = "otp_work_rakesh"
 PASSWORD = "otp_work_rakesh"
 
-API_PORT = 6082                 # New port (not 5000 or 6080)
-API_HOST = "127.0.0.1"           # Bind to localhost only
+API_PORT = 6082
+API_HOST = "127.0.0.1"
 REFRESH_INTERVAL = 2
 
-# ================= COUNTRY MAP (unchanged) =================
+# ================= SELF RESTART SYSTEM =================
+last_success_time = datetime.now()
+RESTART_TIMEOUT = 60  # ৬০ সেকেন্ড = ১ মিনিট
+
+def restart_script():
+    """Script টি রিস্টার্ট করে।"""
+    logger.info("🔄 Script রিস্টার্ট হচ্ছে (inactivity detected)...")
+    python = sys.executable
+    os.execl(python, python, *sys.argv)
+
+async def watchdog_task():
+    """চেক করে বট আটকে আছে কিনা, আটকে থাকলে রিস্টার্ট করে।"""
+    global last_success_time
+    while True:
+        await asyncio.sleep(10)  # প্রতি ১০ সেকেন্ডে চেক
+        if (datetime.now() - last_success_time).total_seconds() > RESTART_TIMEOUT:
+            logger.error(f"❌ {RESTART_TIMEOUT} সেকেন্ড ধরে কোনো কার্যকলাপ নেই! রিস্টার্ট হচ্ছে...")
+            restart_script()
+
+# ================= COUNTRY MAP =================
 COUNTRY_CODE_MAP = {
     "1": ("US", "🇺🇸", "USA"),
     "7": ("RU", "🇷🇺", "RUSSIA"),
@@ -439,38 +459,51 @@ def append_to_json_log(entry):
     except Exception as e:
         logger.error(f"❌ JSON write failed: {e}")
 
-# ================= OTP EXTRACTION =================
+# ================= OTP EXTRACTION (IMPROVED) =================
 def extract_otp_from_sms(sms_text):
     if not sms_text:
         return None
     text = ' '.join(sms_text.split())
+    logger.info(f"🔍 Extracting OTP from: {text[:200]}...")
+    
     patterns = [
-        (r'(?:code|otp|pin|verification|auth|security code|one[- ]time|password)\s*(?:is\s*)?[:;.]?\s*#?\s*(\d{4,8})', None),
+        # সবচেয়ে সাধারণ: #123456 ফরম্যাট
         (r'#(\d{4,8})\b', None),
+        # verification code is 123456
+        (r'(?:code|otp|pin|verification|auth|security code|one[- ]time|password)\s*(?:is\s*)?[:;.]?\s*#?\s*(\d{4,8})', None),
+        # 123456 (সাধারণ ৪-৮ ডিজিটের সংখ্যা)
+        (r'\b(\d{4,8})\b', None),
+        # 123-456 ফরম্যাট
         (r'(\d{3})[-—\s](\d{3})', 6),
         (r'(\d{2})[-—\s](\d{3})', 5),
         (r'(\d{3})[-—\s](\d{2})', 5),
         (r'(\d{3})[-—\s](\d{2})[-—\s](\d{2})', 7),
         (r'(\d{4})[-—\s](\d{4})', 8),
+        # [123456] ফরম্যাট
         (r'[\(\[]\s*(\d{4,8})\s*[\)\]]', None),
-        (r'\b(\d{4,8})\b', None),
     ]
+    
     for pattern, expected_len in patterns:
         match = re.search(pattern, text, re.I)
         if match:
             if expected_len:
                 digits = ''.join(match.groups())
                 if len(digits) == expected_len and digits.isdigit():
+                    logger.info(f"✅ OTP found: {digits}")
                     return digits
             else:
                 if len(match.groups()) > 1:
                     digits = ''.join(match.groups())
                     if digits.isdigit():
+                        logger.info(f"✅ OTP found: {digits}")
                         return digits
                 else:
                     digits = match.group(1) if match.groups() else match.group(0)
                     if digits.isdigit():
+                        logger.info(f"✅ OTP found: {digits}")
                         return digits
+    
+    logger.info(f"⚠️ No OTP found in: {text[:100]}")
     return None
 
 def detect_service_from_sms(msg):
@@ -548,8 +581,10 @@ async def login_and_save_cookie(playwright):
     await browser.close()
     return True
 
-# ================= LOAD STATS (with debug SMS log) =================
+# ================= LOAD STATS =================
 async def load_stats_with_cookie(playwright):
+    global last_success_time
+    
     if not os.path.exists(COOKIE_FILE):
         logger.warning("⚠️ Cookie file not found")
         return False, None
@@ -565,6 +600,7 @@ async def load_stats_with_cookie(playwright):
     try:
         logger.info("🔄 Loading Stats page with cookie...")
         await page.goto(STATS_URL, wait_until="networkidle", timeout=30000)
+        last_success_time = datetime.now()
         await page.wait_for_timeout(2000)
 
         html = await page.content()
@@ -614,7 +650,6 @@ async def load_stats_with_cookie(playwright):
             cli = cols[3].get_text(strip=True)
             sms = cols[4].get_text(strip=True)
             
-            # ডিবাগ লগ – SMS এর প্রথম ২০০ অক্ষর দেখান
             logger.info(f"📝 SMS: {sms[:200]}...")
             
             country = range_val
@@ -622,7 +657,6 @@ async def load_stats_with_cookie(playwright):
 
             otp = extract_otp_from_sms(sms)
             if not otp:
-                logger.info(f"⚠️ No OTP in SMS: {sms[:100]}")
                 continue
 
             otp_count += 1
@@ -651,6 +685,7 @@ async def load_stats_with_cookie(playwright):
         else:
             logger.info("ℹ️ No data rows found")
 
+        last_success_time = datetime.now()
         await browser.close()
         return True, results
 
@@ -666,6 +701,8 @@ async def load_stats_with_cookie(playwright):
 
 # ================= MONITOR LOOP =================
 async def monitor_loop(application):
+    global last_success_time
+    
     playwright = await async_playwright().start()
 
     if not os.path.exists(COOKIE_FILE):
@@ -674,6 +711,7 @@ async def monitor_loop(application):
         if not success:
             logger.error("❌ Initial login failed. Exiting monitor loop.")
             return
+        last_success_time = datetime.now()
 
     consecutive_failures = 0
     cycle_count = 0
@@ -686,6 +724,7 @@ async def monitor_loop(application):
 
             if success:
                 consecutive_failures = 0
+                last_success_time = datetime.now()
                 if data and len(data) > 0:
                     new_count = 0
                     for entry in data:
@@ -730,6 +769,7 @@ async def monitor_loop(application):
                     success = await login_and_save_cookie(playwright)
                     if success:
                         logger.info("✅ New cookie created.")
+                        last_success_time = datetime.now()
                         consecutive_failures = 0
                     else:
                         logger.error("❌ Re-login failed. Will retry later.")
@@ -745,10 +785,11 @@ async def monitor_loop(application):
                 if os.path.exists(COOKIE_FILE):
                     os.remove(COOKIE_FILE)
                 await login_and_save_cookie(playwright)
+                last_success_time = datetime.now()
                 consecutive_failures = 0
             await asyncio.sleep(REFRESH_INTERVAL)
 
-# ================= API SERVER (host=127.0.0.1, port=6082) =================
+# ================= API SERVER =================
 api_app = Flask(__name__)
 
 @api_app.route('/ping', methods=['GET'])
@@ -1144,7 +1185,6 @@ async def ignore_non_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     init_db()
     threading.Thread(target=start_api_server, daemon=True).start()
-    # একটু অপেক্ষা করি API সার্ভার শুরু হওয়ার জন্য
     import time
     time.sleep(1)
     logger.info(f"🌐 API Server running on http://{API_HOST}:{API_PORT}")
@@ -1174,6 +1214,7 @@ def main():
 
     loop = asyncio.get_event_loop()
     loop.create_task(monitor_loop(application))
+    loop.create_task(watchdog_task())  # 🚀 সেলফ রিস্টার্ট ওয়াচডগ
 
     logger.info("🚀 Bot started. Press Ctrl+C to stop.")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
