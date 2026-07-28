@@ -37,7 +37,7 @@ DB_FILE = os.path.join(DATA_FOLDER, "otp.db")
 JSON_FILE = os.path.join(DATA_FOLDER, "otp_log.json")
 
 # ================= CONFIG (UPDATED) =================
-BOT_TOKEN = "8901961818:AAFbhaZIoY13b1nmcuhLOoBpK0M9zgFUJgs"   # নতুন টোকেন
+BOT_TOKEN = "8901961818:AAFbhaZIoY13b1nmcuhLOoBpK0M9zgFUJgs"
 ADMIN_IDS = [8744359777]
 
 LOGIN_URL = "http://139.99.9.120/ints/login"
@@ -46,7 +46,7 @@ USERNAME = "otp_work_rakesh"
 PASSWORD = "otp_work_rakesh"
 
 API_PORT = 6080
-REFRESH_INTERVAL = 4  # seconds
+REFRESH_INTERVAL = 2  # seconds
 
 # ================= FULL COUNTRY MAP (unchanged) =================
 COUNTRY_CODE_MAP = {
@@ -503,7 +503,7 @@ def detect_service_from_sms(msg):
 async def login_and_save_cookie(playwright):
     """শুধুমাত্র প্রথমবার বা কুকি এক্সপায়ার হলে লগইন করে কুকি সেভ করে (headless)"""
     browser = await playwright.chromium.launch(
-        headless=True,   # <-- headless mode on (no GUI)
+        headless=True,
         slow_mo=0,
         args=["--disable-blink-features=AutomationControlled"]
     )
@@ -544,14 +544,15 @@ async def login_and_save_cookie(playwright):
     await browser.close()
     return True
 
+# ================= UPDATED: load_stats_with_cookie (robust) =================
 async def load_stats_with_cookie(playwright):
-    """কুকি দিয়ে পেজ লোড (headless)"""
+    """কুকি দিয়ে পেজ লোড (headless) + রোবাস্ট ওয়েট"""
     if not os.path.exists(COOKIE_FILE):
         logger.warning("⚠️ Cookie file not found")
         return False, None
 
     browser = await playwright.chromium.launch(
-        headless=True,   # <-- headless mode
+        headless=True,
         slow_mo=0,
         args=["--disable-blink-features=AutomationControlled"]
     )
@@ -560,38 +561,28 @@ async def load_stats_with_cookie(playwright):
 
     try:
         logger.info("🔄 Loading Stats page with cookie...")
-        await page.goto(STATS_URL, wait_until="domcontentloaded", timeout=20000)
-        await page.wait_for_timeout(1000)
+        await page.goto(STATS_URL, wait_until="networkidle", timeout=30000)
+        await page.wait_for_timeout(2000)
 
-        # Wait for data rows (date pattern)
+        # টেবিলের প্রথম রো আসার জন্য অপেক্ষা (১৫ সেকেন্ড)
         try:
-            await page.wait_for_function(
-                """() => {
-                    const rows = document.querySelectorAll('table.dataTable tbody tr');
-                    for (let row of rows) {
-                        const firstCell = row.querySelector('td');
-                        if (firstCell) {
-                            const text = firstCell.innerText.trim();
-                            if (/^\\d{4}-\\d{2}-\\d{2}/.test(text)) {
-                                return true;
-                            }
-                        }
-                    }
-                    return false;
-                }""",
-                timeout=10000,
-                polling=200
-            )
-            logger.info("✅ Data rows loaded.")
+            await page.wait_for_selector('table.dataTable tbody tr', timeout=15000)
+            logger.info("✅ Table row found.")
         except Exception as e:
-            logger.warning(f"⏳ Data rows not found within timeout: {e}")
+            logger.warning(f"⏳ Table row not found: {e}. Dumping HTML for debug.")
+            html_dump = await page.content()
+            with open("debug_table_not_found.html", "w", encoding="utf-8") as f:
+                f.write(html_dump)
+            logger.info("📄 HTML dumped to debug_table_not_found.html")
+            # তবুও আমরা চেষ্টা করবো পার্স করার
+            pass
 
-        # Scrape data
+        # পার্সিং
         html = await page.content()
         soup = BeautifulSoup(html, 'html.parser')
         table = soup.select_one('table.dataTable tbody')
         if not table:
-            logger.warning("⚠️ Table body not found")
+            logger.warning("⚠️ Table body not found after wait.")
             await browser.close()
             return False, None
 
@@ -655,7 +646,6 @@ async def load_stats_with_cookie(playwright):
 async def monitor_loop(application):
     playwright = await async_playwright().start()
 
-    # First login if no cookie
     if not os.path.exists(COOKIE_FILE):
         logger.info("🔑 First-time login – creating cookie...")
         success = await login_and_save_cookie(playwright)
