@@ -45,8 +45,8 @@ STATS_URL = "http://139.99.9.120/ints/client/SMSCDRStats"
 USERNAME = "otp_work_rakesh"
 PASSWORD = "otp_work_rakesh"
 
-API_PORT = 6080          # changed to 6080
-REFRESH_INTERVAL = 2
+API_PORT = 6080
+REFRESH_INTERVAL = 2  # seconds
 
 # ================= COUNTRY MAP (unchanged) =================
 COUNTRY_CODE_MAP = {
@@ -492,6 +492,10 @@ def detect_service_from_sms(msg):
         "KUICK": [r'kuick'],
         "Telkom": [r'telkom'],
         "ISM": [r'ism'],
+        "Casushi": [r'casushi'],
+        "Razer": [r'razer'],
+        "Qsms": [r'qsms'],
+        "RedotPay": [r'redotpay'],
     }
     for srv, pats in patterns.items():
         for p in pats:
@@ -543,7 +547,7 @@ async def login_and_save_cookie(playwright):
     await browser.close()
     return True
 
-# ================= IMPROVED LOAD STATS (FIX) =================
+# ================= LOAD STATS (with enhanced logging) =================
 async def load_stats_with_cookie(playwright):
     if not os.path.exists(COOKIE_FILE):
         logger.warning("⚠️ Cookie file not found")
@@ -562,58 +566,59 @@ async def load_stats_with_cookie(playwright):
         await page.goto(STATS_URL, wait_until="networkidle", timeout=30000)
         await page.wait_for_timeout(2000)
 
-        # অপেক্ষা করি যতক্ষণ না টেবিলে একটি সারি দৃশ্যমান হয় এবং প্রথম কলামে ডেট (YYYY-MM-DD) প্যাটার্ন থাকে
-        try:
-            await page.wait_for_function(
-                """() => {
-                    const rows = document.querySelectorAll('table.dataTable tbody tr');
-                    for (let row of rows) {
-                        const firstCell = row.querySelector('td');
-                        if (firstCell) {
-                            const text = firstCell.innerText.trim();
-                            if (/^\\d{4}-\\d{2}-\\d{2}/.test(text)) {
-                                return true;
-                            }
-                        }
-                    }
-                    return false;
-                }""",
-                timeout=20000,
-                polling=200
-            )
-            logger.info("✅ Data rows with date pattern found.")
-        except Exception as e:
-            logger.warning(f"⏳ Data rows not found: {e}. Dumping HTML for debug.")
-            html_dump = await page.content()
-            with open("debug_table_not_found.html", "w", encoding="utf-8") as f:
-                f.write(html_dump)
-            logger.info("📄 HTML dumped to debug_table_not_found.html")
-            # তবুও চেষ্টা করবো পার্স করার
-
-        # পার্সিং
+        # চেক করি পেজে টেবিল আছে কিনা
         html = await page.content()
         soup = BeautifulSoup(html, 'html.parser')
+        
+        # টেবিল খুঁজি (dataTable ক্লাস সহ)
         table = soup.select_one('table.dataTable tbody')
         if not table:
-            logger.warning("⚠️ Table body not found after wait.")
+            table = soup.find('table')
+            if table:
+                table = table.find('tbody')
+            if not table:
+                logger.warning("⚠️ No table found on page. Possibly no data.")
+                await browser.close()
+                return False, None
+
+        rows = table.find_all('tr')
+        total_rows = len(rows)
+        logger.info(f"📊 Found {total_rows} rows in table.")
+
+        if total_rows == 0:
+            logger.info("ℹ️ Table found but no rows. No data yet.")
+            await browser.close()
+            return True, []  # সফল কিন্তু ডেটা নেই
+
+        # কলাম সংখ্যা চেক করি (প্রথম সারি থেকে)
+        first_row = rows[0]
+        first_cols = first_row.find_all('td')
+        col_count = len(first_cols)
+        logger.info(f"📋 Table has {col_count} columns.")
+
+        if col_count < 7:
+            logger.warning(f"⚠️ Table has only {col_count} columns, expected at least 7")
             await browser.close()
             return False, None
 
-        rows = table.find_all('tr')
+        # ডেটা পার্স করি
         results = []
+        otp_count = 0
         for row in rows:
             cols = row.find_all('td')
-            if len(cols) < 9:
+            if len(cols) < 7:
                 continue
             first = cols[0].get_text(strip=True)
             if re.match(r'^[\d,]+$', first) or "Total" in first:
                 continue
+            
             date = cols[0].get_text(strip=True)
             range_val = cols[1].get_text(strip=True)
             number = cols[2].get_text(strip=True)
             cli = cols[3].get_text(strip=True)
-            client = cols[4].get_text(strip=True)
-            sms = cols[5].get_text(strip=True)
+            sms = cols[4].get_text(strip=True)
+            # cols[5] = Currency (not needed)
+            # cols[6] = My Payout (not needed)
 
             country = range_val
             country_code = get_country_code(country)
@@ -622,11 +627,10 @@ async def load_stats_with_cookie(playwright):
             if not otp:
                 continue
 
+            otp_count += 1
             service = "UNKNOWN"
             if cli and cli.strip() and cli.upper() not in ["UNKNOWN", "SERVICE", ""]:
                 service = cli.strip()
-            elif client and client.strip() and client.upper() not in ["UNKNOWN", "SERVICE", ""]:
-                service = client.strip().lstrip('#')
             else:
                 service = detect_service_from_sms(sms)
 
@@ -641,6 +645,14 @@ async def load_stats_with_cookie(playwright):
                 "sms": sms,
                 "otp": otp
             })
+
+        # লগ দেখাই
+        if total_rows > 0:
+            logger.info(f"✅ Data Rows Loaded")
+            logger.info(f"🔥 Found {total_rows} Rows")
+            logger.info(f"🔑 Extracted {otp_count} OTPs")
+        else:
+            logger.info("ℹ️ No data rows found")
 
         await browser.close()
         return True, results
@@ -667,49 +679,55 @@ async def monitor_loop(application):
             return
 
     consecutive_failures = 0
+    cycle_count = 0
 
     while True:
         try:
+            cycle_count += 1
+            logger.info(f"🔄 Monitor cycle #{cycle_count} started...")
             success, data = await load_stats_with_cookie(playwright)
 
-            if success and data is not None:
-                consecutive_failures = 0
-                new_count = 0
-                for entry in data:
-                    if is_duplicate(entry["id"]):
-                        continue
-                    save_message(
-                        entry["id"],
-                        entry["number"],
-                        entry["otp"],
-                        entry["service"],
-                        entry["country"],
-                        entry.get("country_code", ""),
-                        entry["date"],
-                        entry["sms"]
-                    )
-                    append_to_json_log({
-                        "id": entry["id"],
-                        "number": entry["number"],
-                        "otp": entry["otp"],
-                        "service": entry["service"],
-                        "country": entry["country"],
-                        "country_code": entry.get("country_code", ""),
-                        "timestamp": entry["date"],
-                        "full_message": entry["sms"]
-                    })
-                    new_count += 1
-                    logger.info(f"💾 New OTP stored: {entry['otp']} for {entry['number']}")
-                if new_count:
-                    logger.info(f"📤 Total {new_count} new OTPs stored.")
+            if success:
+                consecutive_failures = 0  # পেজ লোড সফল হলে রিসেট
+                if data and len(data) > 0:
+                    new_count = 0
+                    for entry in data:
+                        if is_duplicate(entry["id"]):
+                            continue
+                        save_message(
+                            entry["id"],
+                            entry["number"],
+                            entry["otp"],
+                            entry["service"],
+                            entry["country"],
+                            entry.get("country_code", ""),
+                            entry["date"],
+                            entry["sms"]
+                        )
+                        append_to_json_log({
+                            "id": entry["id"],
+                            "number": entry["number"],
+                            "otp": entry["otp"],
+                            "service": entry["service"],
+                            "country": entry["country"],
+                            "country_code": entry.get("country_code", ""),
+                            "timestamp": entry["date"],
+                            "full_message": entry["sms"]
+                        })
+                        new_count += 1
+                        logger.info(f"💾 New OTP stored: {entry['otp']} for {entry['number']}")
+                    if new_count:
+                        logger.info(f"📤 Total {new_count} new OTPs stored.")
+                    else:
+                        logger.info("🔄 No new OTPs found.")
                 else:
-                    logger.debug("🔄 No new OTPs.")
+                    logger.info("🔄 No OTPs found, checking again...")
             else:
                 consecutive_failures += 1
                 logger.warning(f"⚠️ Cookie load failed ({consecutive_failures} consecutive)")
 
-                if consecutive_failures >= 2:
-                    logger.info("🔄 Re-login triggered...")
+                if consecutive_failures >= 3:
+                    logger.info("🔄 Re-login triggered (3 consecutive failures)...")
                     if os.path.exists(COOKIE_FILE):
                         os.remove(COOKIE_FILE)
                     success = await login_and_save_cookie(playwright)
@@ -718,6 +736,10 @@ async def monitor_loop(application):
                         consecutive_failures = 0
                     else:
                         logger.error("❌ Re-login failed. Will retry later.")
+
+            # এই লাইনটি সব সময় দেখাবে
+            logger.info("🕛 Waiting for OTPs...")
+            await asyncio.sleep(REFRESH_INTERVAL)
 
         except Exception as e:
             logger.error(f"❌ Monitor loop error: {e}")
@@ -728,8 +750,7 @@ async def monitor_loop(application):
                     os.remove(COOKIE_FILE)
                 await login_and_save_cookie(playwright)
                 consecutive_failures = 0
-
-        await asyncio.sleep(REFRESH_INTERVAL)
+            await asyncio.sleep(REFRESH_INTERVAL)
 
 # ================= API SERVER =================
 api_app = Flask(__name__)
